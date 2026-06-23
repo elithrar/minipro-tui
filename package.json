@@ -1,0 +1,20 @@
+{
+  "name": "minipro-tui",
+  "module": "src/main.ts",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "test": "bun test",
+    "build": "bun build src/main.ts --compile --outfile minipro-tui"
+  },
+  "type": "module",
+  "dependencies": {
+    "@opentui/core": "^0.4.1"
+  }
+}

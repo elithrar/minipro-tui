@@ -1,0 +1,4 @@
+tl866a:  TL866CS/A
+tl866ii: TL866II+
+t48:     T48  (mostly complete)
+t56:     T56  (experimental)

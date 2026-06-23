@@ -1,0 +1,8 @@
+Name: AT28C64B
+Available on: TL866A/CS
+Memory: 8192 Bytes
+Package: DIP28
+ICSP: -
+Protocol: 0x07
+Read buffer size: 512 Bytes
+Write buffer size: 128 Bytes
