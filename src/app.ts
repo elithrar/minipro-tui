@@ -107,7 +107,7 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const topRow = new BoxRenderable(renderer, { id: "top-row", height: "66%", width: "100%", flexDirection: "row", marginBottom: 1 });
+    const topRow = new BoxRenderable(renderer, { id: "top-row", height: "50%", width: "100%", flexDirection: "row", marginBottom: 1 });
     const rightColumn = new BoxRenderable(renderer, { id: "right-column", flexGrow: 1, flexBasis: 0, height: "100%", flexDirection: "column" });
 
     const filesPanel = panel(renderer, "files-panel", "Files");
@@ -127,7 +127,11 @@ export class MiniproTuiApp {
       cursorColor: ORANGE,
       marginBottom: 1,
     });
-    const chips = new SelectRenderable(renderer, selectOptions("chips", "100%"));
+    const chips = new SelectRenderable(renderer, {
+      ...selectOptions("chips", "100%"),
+      showDescription: false,
+      itemSpacing: 0,
+    });
     chipPanel.add(chipQuery);
     chipPanel.add(chips);
 
@@ -675,7 +679,9 @@ export class MiniproTuiApp {
       job: this.job,
     });
     this.components.files.options = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
-    this.components.chips.options = this.chipResults.length > 0 ? this.chipResults.map((chip) => ({ name: chip, description: chip === DEFAULT_CHIP_QUERY ? "default" : "", value: chip })) : [{ name: `No results for ${this.chipQuery}`, description: "Type a query and press Enter.", value: "" }];
+    const chipOptions = formatChipOptions(this.chipResults);
+    this.components.chips.options = chipOptions;
+    this.components.chips.selectedIndex = Math.max(0, chipOptions.findIndex((option) => option.value === this.selectedChip));
     this.components.info.content = formatChipInfo(this.chipInfo);
     this.components.log.content = this.logLines.slice(-120).join("\n");
     this.components.footer.content = footerText();
@@ -752,6 +758,15 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
 
 function footerText(): string {
   return "q quit | r refresh | R read | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
+}
+
+function formatChipOptions(chips: string[]): SelectOption[] {
+  const ordered = [DEFAULT_CHIP_QUERY, ...chips.filter((chip) => chip !== DEFAULT_CHIP_QUERY)];
+  return ordered.map((chip) => ({
+    name: chip === DEFAULT_CHIP_QUERY ? `${chip} (default)` : chip,
+    description: chip === DEFAULT_CHIP_QUERY ? "default" : "",
+    value: chip,
+  }));
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {
