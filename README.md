@@ -1,6 +1,6 @@
 # minipro-tui
 
-`minipro-tui` is a Bun/TypeScript terminal UI for safer chip programming with the `minipro` CLI and OpenTUI.
+`minipro-tui` is a terminal UI for safer chip programming with the `minipro` CLI and OpenTUI.
 
 It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, pin check, blank check, verify, and safe write workflows without shell interpolation.
 
@@ -10,17 +10,17 @@ It scans the current directory for candidate image files, queries the live `mini
 - `minipro` on `PATH` for hardware operations.
 - An XGecu-compatible programmer supported by `minipro` for programming workflows.
 
-The app also starts cleanly with no programmer connected so you can inspect files and search the chip database offline.
+The app does not require a programmer connected so you can inspect files and search the chip database offline. The default programmer database is `T48`, and the default chip query is `AT28C64B`.
 
-The default programmer database is `T48`, and the default chip query is `AT28C64B`.
+## Usage
 
-## Install
+Install:
 
 ```bash
 bun install
 ```
 
-## Run During Development
+Run during development:
 
 ```bash
 bun run src/main.ts
@@ -32,14 +32,14 @@ or:
 bun run dev
 ```
 
-## Build A Standalone Binary
+Build a standalone binary:
 
 ```bash
 bun run build
 ./minipro-tui
 ```
 
-## Test
+Test:
 
 ```bash
 bun test
