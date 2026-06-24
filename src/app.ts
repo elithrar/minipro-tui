@@ -141,7 +141,15 @@ export class MiniproTuiApp {
     const statusPanel = panel(renderer, "status-panel", "Status");
     statusPanel.width = "100%";
     statusPanel.padding = 0;
-    const statusSummary = new TextRenderable(renderer, { id: "status-summary", width: "100%", height: "100%", fg: "#ffffff", bg: PANEL, wrapMode: "none", truncate: true });
+    const statusSummary = new TextRenderable(renderer, {
+      id: "status-summary",
+      width: "100%",
+      height: "100%",
+      fg: "#ffffff",
+      bg: PANEL,
+      wrapMode: "none",
+      truncate: false,
+    });
     statusPanel.add(statusSummary);
 
     const logPanel = panel(renderer, "log-panel", "Actions / Log");
@@ -745,6 +753,7 @@ export class MiniproTuiApp {
     const chipOptions = formatChipOptions(this.chipResults);
     this.components.chips.options = chipOptions;
     this.components.chips.selectedIndex = Math.max(0, chipOptions.findIndex((option) => option.value === this.selectedChip));
+    const statusSummaryWidth = this.components.statusSummary.width > 0 ? this.components.statusSummary.width : undefined;
     this.components.statusSummary.content = formatStatusSummary({
       programmerStatus: this.programmerStatus,
       database: this.database,
@@ -756,7 +765,7 @@ export class MiniproTuiApp {
       fileCount: this.files.length,
       chipResultCount: this.chipResults.length,
       showAllFiles: this.showAllFiles,
-    });
+    }, { width: statusSummaryWidth });
     this.components.log.content = this.logLines.slice(-120).join("\n");
     this.components.footer.content = footerText();
     this.renderer?.root.requestRender();
