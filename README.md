@@ -4,6 +4,8 @@
 
 It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, pin check, blank check, verify, and safe write workflows without shell interpolation.
 
+<img width="1000" alt="image" src="https://github.com/user-attachments/assets/43aaa758-18d6-4d4e-9167-3ef9cde780bd" />
+
 ## Requirements
 
 - Bun 1.3 or newer.
