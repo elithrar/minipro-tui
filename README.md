@@ -2,7 +2,7 @@
 
 `minipro-tui` is a terminal UI for safer chip programming with the `minipro` CLI and OpenTUI.
 
-It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, pin check, blank check, verify, and safe write workflows without shell interpolation.
+It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, compare, pin check, blank check, verify, and safe write workflows without shell interpolation.
 
 <img width="1000" alt="image" src="https://github.com/user-attachments/assets/43aaa758-18d6-4d4e-9167-3ef9cde780bd" />
 
@@ -75,10 +75,16 @@ minipro -p <chip> -r <output-file>
 
 After a successful read, the app hashes the output file and shows the SHA-256 checksum in the log.
 
+## Compare Flow
+
+Press `m` to compare the selected local file with the current chip contents. The app shows the local file SHA-256 before starting, reads the chip to a temporary file, hashes the readback, and then shows both hashes in a dialog.
+
+The result dialog says `matched` when the hashes match, or `files do not match` when they differ.
+
 ## Keys
 
 ```text
-q quit | r refresh | R read | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help
+q quit | r refresh | R read | m compare | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help
 ```
 
 ## Credit

@@ -105,5 +105,5 @@ function formatNextAction(input: StatusSummaryInput): string {
     return "Use a matching image or explicitly allow size mismatch";
   }
   if (formatDangerousOptions(input.advanced).length > 0) return "Review advanced options, then press w to preview write";
-  return "Press w to preview write, v verify, c pin check, R read";
+  return "Press w to preview write, m compare, v verify, c pin check, R read";
 }

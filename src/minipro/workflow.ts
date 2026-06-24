@@ -56,6 +56,19 @@ export type ReadWorkflowInput = {
   onLog?: (line: string) => void;
 };
 
+export type CompareWorkflowInput = {
+  file?: FileEntry;
+  chip?: string;
+  confirmed: boolean;
+  confirmedSha256?: string;
+  confirmedSize?: number;
+  confirmedMtimeMs?: number;
+  advanced?: AdvancedOptions;
+  runCommand: WorkflowCommandRunner;
+  keepReadbackFile?: boolean;
+  onLog?: (line: string) => void;
+};
+
 export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput): Promise<WorkflowResult> {
   const advanced = input.advanced ?? {};
   const preconditionError = validateWorkflowInput(input.file, input.chip, input.chipInfo, input.confirmed, advanced.allowSizeMismatch, input.confirmedBytes?.byteLength);
@@ -179,6 +192,71 @@ export async function runReadWorkflow(input: ReadWorkflowInput): Promise<Workflo
     readbackSha256: sha.value,
     readbackPath: input.outputFile,
   };
+}
+
+export async function runCompareWorkflow(input: CompareWorkflowInput): Promise<WorkflowResult> {
+  const advanced = input.advanced ?? {};
+  if (!input.file) return { ok: false, message: "Select a file before starting compare.", steps: [] };
+  if (!input.chip) return { ok: false, message: "Select a chip before starting compare.", steps: [] };
+  if (!input.confirmed) return { ok: false, message: "Confirm compare before starting.", steps: [] };
+
+  const fileStat = await safeStat(input.file.path);
+  if (!fileStat.ok) return { ok: false, message: fileStat.message, steps: [] };
+  if (
+    input.confirmedSha256 &&
+    input.confirmedSize !== undefined &&
+    input.confirmedMtimeMs !== undefined &&
+    (input.confirmedSize !== fileStat.size || input.confirmedMtimeMs !== fileStat.mtimeMs)
+  ) {
+    return { ok: false, message: "Selected file changed while preparing compare. Refresh and reselect it before comparing.", steps: [] };
+  }
+
+  let localSha256 = input.confirmedSha256;
+  if (!localSha256) {
+    const localSha = await safeSha256File(input.file.path, fileStat.size, fileStat.mtimeMs);
+    if (!localSha.ok) return { ok: false, message: localSha.message, steps: [] };
+    localSha256 = localSha.value;
+  }
+
+  const steps: WorkflowStepResult[] = [];
+  const tempDir = await mkdtemp(join(tmpdir(), "minipro-tui-compare-"));
+  const readbackPath = join(tempDir, `${basename(input.file.path)}.chip-readback`);
+  const finish = async (result: WorkflowResult): Promise<WorkflowResult> => {
+    if (!input.keepReadbackFile) await rm(tempDir, { recursive: true, force: true });
+    return result;
+  };
+
+  input.onLog?.(`Compare local ${input.file.path}: ${fileStat.size} B sha256 ${localSha256}`);
+
+  const connected = await runStep(steps, input.runCommand, "detect programmer", buildDetectProgrammerArgs());
+  if (failed(connected)) return finish(fail("detect programmer", connected, steps, localSha256, readbackPath));
+  if (!parseProgrammerStatus(`${connected.stdout}\n${connected.stderr}`).connected) {
+    return finish({ ok: false, message: "No connected programmer detected.", steps, originalSha256: localSha256, readbackPath });
+  }
+
+  const read = await runStep(steps, input.runCommand, "read chip for compare", buildReadArgs(input.chip, readbackPath, advanced));
+  if (failed(read)) return finish(fail("read chip for compare", read, steps, localSha256, readbackPath));
+
+  const readbackStat = await safeStat(readbackPath);
+  if (!readbackStat.ok) return finish({ ok: false, message: readbackStat.message, steps, originalSha256: localSha256, readbackPath });
+
+  const readbackSha = await safeSha256File(readbackPath, readbackStat.size, readbackStat.mtimeMs);
+  if (!readbackSha.ok) return finish({ ok: false, message: readbackSha.message, steps, originalSha256: localSha256, readbackPath });
+
+  const matched = localSha256 === readbackSha.value;
+  const message = matched
+    ? `Compare matched. Local sha256 ${localSha256}, chip sha256 ${readbackSha.value}.`
+    : `Compare files do not match. Local sha256 ${localSha256}, chip sha256 ${readbackSha.value}.`;
+  input.onLog?.(`Compare chip readback: ${readbackStat.size} B sha256 ${readbackSha.value}`);
+
+  return finish({
+    ok: matched,
+    message,
+    steps,
+    originalSha256: localSha256,
+    readbackSha256: readbackSha.value,
+    readbackPath,
+  });
 }
 
 async function safeStat(path: string): Promise<{ ok: true; size: number; mtimeMs: number } | { ok: false; message: string }> {

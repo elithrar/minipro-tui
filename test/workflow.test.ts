@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 
 import type { FileEntry, MiniproResult } from "../src/types";
-import { runDefaultWriteWorkflow, runReadWorkflow, type WorkflowCommandRunner } from "../src/minipro/workflow";
+import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type WorkflowCommandRunner } from "../src/minipro/workflow";
 
 test("default flow includes pin check, erase, blank check, write, verify, and readback compare", async () => {
   const dir = join(import.meta.dir, ".tmp-workflow");
@@ -170,6 +170,57 @@ test("read workflow requires confirmation", async () => {
   const result = await runReadWorkflow({ chip: "AT28C64B", outputFile: "read.bin", confirmed: false, runCommand: async (args) => ok(args) });
   expect(result.ok).toBe(false);
   expect(result.message).toContain("Confirm read");
+});
+
+test("compare workflow reports matched hashes", async () => {
+  const dir = join(import.meta.dir, ".tmp-workflow");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "compare-match.bin");
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  await writeFile(path, bytes);
+  const calls: string[][] = [];
+  const result = await runCompareWorkflow({
+    file: fileEntry(path, 4),
+    chip: "AT28C64B",
+    confirmed: true,
+    runCommand: async (args) => {
+      calls.push(args);
+      if (args.includes("-r")) await writeFile(args.at(-1) ?? "", bytes);
+      return ok(args, args[0] === "-k" ? "T48" : "");
+    },
+  });
+
+  expect(result.ok).toBe(true);
+  expect(result.message).toContain("matched");
+  expect(result.originalSha256).toBe(result.readbackSha256);
+  expect(calls).toEqual([
+    ["-k"],
+    ["-p", "AT28C64B", "-r", result.readbackPath],
+  ]);
+});
+
+test("compare workflow reports files do not match with both hashes", async () => {
+  const dir = join(import.meta.dir, ".tmp-workflow");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "compare-mismatch.bin");
+  await writeFile(path, new Uint8Array([1, 2, 3, 4]));
+  const result = await runCompareWorkflow({
+    file: fileEntry(path, 4),
+    chip: "AT28C64B",
+    confirmed: true,
+    runCommand: async (args) => {
+      if (args.includes("-r")) await writeFile(args.at(-1) ?? "", new Uint8Array([4, 3, 2, 1]));
+      return ok(args, args[0] === "-k" ? "T48" : "");
+    },
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.message).toContain("files do not match");
+  expect(result.message).toContain("Local sha256");
+  expect(result.message).toContain("chip sha256");
+  expect(result.originalSha256).toBeDefined();
+  expect(result.readbackSha256).toBeDefined();
+  expect(result.originalSha256).not.toBe(result.readbackSha256);
 });
 
 function ok(command: string[], stdout = ""): MiniproResult {
