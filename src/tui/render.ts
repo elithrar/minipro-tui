@@ -1,5 +1,18 @@
-import type { ChipInfo, FileEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
+import type { AdvancedOptions, ChipInfo, FileEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
 import { formatBytes } from "../files/scan";
+
+export type StatusSummaryInput = {
+  programmerStatus: ProgrammerStatus;
+  database: ProgrammerKind;
+  selectedChip?: string;
+  selectedFile?: FileEntry;
+  chipInfo?: ChipInfo;
+  job: JobState;
+  advanced: AdvancedOptions;
+  fileCount: number;
+  chipResultCount: number;
+  showAllFiles: boolean;
+};
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
@@ -38,4 +51,59 @@ export function formatChipInfo(info?: ChipInfo): string {
     "",
     info.raw,
   ].join("\n");
+}
+
+export function formatStatusSummary(input: StatusSummaryInput): string {
+  const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
+  const chip = input.chipInfo
+    ? `${input.chipInfo.name || input.selectedChip || "unknown"} | ${formatChipMemory(input.chipInfo)} | ${input.chipInfo.packageName ?? "package unknown"}`
+    : input.selectedChip
+      ? `${input.selectedChip} | load chip info before writing`
+      : "none selected";
+  const image = input.selectedFile ? `${input.selectedFile.name} | ${formatBytes(input.selectedFile.size)} | sha ${input.selectedFile.sha256Short}` : "none selected";
+  const dangerous = formatDangerousOptions(input.advanced);
+
+  return [
+    formatFitLine(input),
+    `Safety      ${dangerous.length > 0 ? `Review: ${dangerous.join(", ")}` : "Default safe write: erase, blank, write, verify, readback compare"}`,
+    `Next        ${formatNextAction(input)}`,
+    `Context     ${programmer} | DB ${input.database} | Files ${input.fileCount} | Chips ${input.chipResultCount} | ${chip} | ${image}`,
+  ].join("\n");
+}
+
+function formatChipMemory(info: ChipInfo): string {
+  return info.memoryBytes === undefined ? "size unknown" : formatBytes(info.memoryBytes);
+}
+
+function formatFitLine(input: StatusSummaryInput): string {
+  if (!input.selectedFile || !input.selectedChip) return "Fit         Select a file and chip before writing";
+  if (!input.chipInfo) return "Fit         Load chip info to check image size";
+  if (input.chipInfo.memoryBytes === undefined) return "Fit         Chip memory size unknown";
+  if (input.selectedFile.size === input.chipInfo.memoryBytes) return `Fit         OK: image matches chip memory (${formatBytes(input.selectedFile.size)})`;
+
+  const mode = input.advanced.allowSizeMismatch ? "Override" : "Blocked";
+  return `Fit         ${mode}: image ${formatBytes(input.selectedFile.size)} vs chip ${formatBytes(input.chipInfo.memoryBytes)}`;
+}
+
+function formatDangerousOptions(options: AdvancedOptions): string[] {
+  return [
+    options.allowSizeMismatch ? "size mismatch allowed" : undefined,
+    options.disableReadbackCompare ? "readback compare off" : undefined,
+    options.skipErase ? "erase skipped" : undefined,
+    options.skipVerify ? "verify skipped" : undefined,
+    options.ignoreIdMismatch ? "ID mismatch ignored" : undefined,
+    options.skipIdRead ? "ID read skipped" : undefined,
+  ].filter((item): item is string => item !== undefined);
+}
+
+function formatNextAction(input: StatusSummaryInput): string {
+  if (input.job.kind === "running") return `Wait for ${input.job.step}`;
+  if (!input.selectedChip) return "Search and select the target chip";
+  if (!input.selectedFile) return "Select an image file, or press R to read the chip";
+  if (!input.chipInfo) return "Select a chip result to load chip info";
+  if (input.chipInfo.memoryBytes !== undefined && input.selectedFile.size !== input.chipInfo.memoryBytes && !input.advanced.allowSizeMismatch) {
+    return "Use a matching image or explicitly allow size mismatch";
+  }
+  if (formatDangerousOptions(input.advanced).length > 0) return "Review advanced options, then press w to preview write";
+  return "Press w to preview write, v verify, c pin check, R read";
 }

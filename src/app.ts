@@ -30,21 +30,23 @@ import {
 import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
 import { runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
-import { formatChipInfo, formatFileOption, formatStatusLine } from "./tui/render";
+import { formatFileOption, formatStatusLine, formatStatusSummary } from "./tui/render";
 
 const ORANGE = "#ff8700";
 const BG = "#101014";
 const PANEL = "#17171d";
 const MUTED = "#a8a8a8";
+const CONNECTED = "#238636";
+const DISCONNECTED = "#da3633";
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 
 type Components = {
-  status: TextRenderable;
+  statusBar: TextRenderable;
   files: SelectRenderable;
   chipQuery: InputRenderable;
   chips: SelectRenderable;
-  info: TextRenderable;
+  statusSummary: TextRenderable;
   log: TextRenderable;
   footer: TextRenderable;
 };
@@ -89,12 +91,12 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const status = new TextRenderable(renderer, {
-      id: "status",
+    const statusBar = new TextRenderable(renderer, {
+      id: "status-bar",
       height: 1,
       width: "100%",
       fg: "#ffffff",
-      bg: ORANGE,
+      bg: DISCONNECTED,
       truncate: true,
     });
 
@@ -107,15 +109,16 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const topRow = new BoxRenderable(renderer, { id: "top-row", height: "50%", width: "100%", flexDirection: "row", marginBottom: 1 });
-    const rightColumn = new BoxRenderable(renderer, { id: "right-column", flexGrow: 1, flexBasis: 0, height: "100%", flexDirection: "column" });
-
+    const topRow = new BoxRenderable(renderer, { id: "top-row", height: "33%", width: "100%", flexDirection: "row", marginBottom: 1 });
     const filesPanel = panel(renderer, "files-panel", "Files");
+    filesPanel.marginRight = 1;
+    filesPanel.padding = 0;
     const files = new SelectRenderable(renderer, selectOptions("files", "100%"));
     filesPanel.add(files);
 
     const chipPanel = panel(renderer, "chip-panel", "Chip Search");
     chipPanel.marginRight = 1;
+    chipPanel.padding = 0;
     const chipQuery = new InputRenderable(renderer, {
       id: "chip-query",
       value: DEFAULT_CHIP_QUERY,
@@ -135,10 +138,11 @@ export class MiniproTuiApp {
     chipPanel.add(chipQuery);
     chipPanel.add(chips);
 
-    const infoPanel = panel(renderer, "info-panel", "Chip Info");
-    infoPanel.marginBottom = 1;
-    const info = new TextRenderable(renderer, { id: "info", width: "100%", height: "100%", fg: "#ffffff", bg: PANEL, wrapMode: "word" });
-    infoPanel.add(info);
+    const statusPanel = panel(renderer, "status-panel", "Status");
+    statusPanel.width = "100%";
+    statusPanel.padding = 0;
+    const statusSummary = new TextRenderable(renderer, { id: "status-summary", width: "100%", height: "100%", fg: "#ffffff", bg: PANEL, wrapMode: "none", truncate: true });
+    statusPanel.add(statusSummary);
 
     const logPanel = panel(renderer, "log-panel", "Actions / Log");
     logPanel.flexGrow = 1;
@@ -156,19 +160,18 @@ export class MiniproTuiApp {
       truncate: true,
     });
 
+    topRow.add(filesPanel);
     topRow.add(chipPanel);
-    rightColumn.add(infoPanel);
-    rightColumn.add(filesPanel);
-    topRow.add(rightColumn);
+    topRow.add(statusPanel);
     main.add(topRow);
     main.add(logPanel);
-    root.add(status);
+    root.add(statusBar);
     root.add(main);
     root.add(footer);
     renderer.root.add(root);
     files.focus();
 
-    return { status, files, chipQuery, chips, info, log, footer };
+    return { statusBar, files, chipQuery, chips, statusSummary, log, footer };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -503,6 +506,7 @@ export class MiniproTuiApp {
         footerText(),
         "",
         "Defaults: T48 programmer database and AT28C64B chip query.",
+        "Status: persistent operator summary for programmer, chip, image, size fit, safety options, and next action.",
         "Write path: check, erase, blank check, write, verify, readback compare, with confirmation.",
         "Read path: Shift+R, edit filename, choose Read or Cancel, then checksum is logged.",
       ].join("\n"),
@@ -671,18 +675,32 @@ export class MiniproTuiApp {
 
   private render(): void {
     if (!this.components) return;
-    this.components.status.content = formatStatusLine({
+    this.components.statusBar.content = formatStatusLine({
       programmerStatus: this.programmerStatus,
       database: this.database,
       selectedChip: this.selectedChip,
       selectedFile: this.selectedFile,
       job: this.job,
     });
-    this.components.files.options = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
+    this.components.statusBar.bg = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
+    const fileOptions = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
+    this.components.files.options = fileOptions;
+    this.components.files.selectedIndex = Math.max(0, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
     const chipOptions = formatChipOptions(this.chipResults);
     this.components.chips.options = chipOptions;
     this.components.chips.selectedIndex = Math.max(0, chipOptions.findIndex((option) => option.value === this.selectedChip));
-    this.components.info.content = formatChipInfo(this.chipInfo);
+    this.components.statusSummary.content = formatStatusSummary({
+      programmerStatus: this.programmerStatus,
+      database: this.database,
+      selectedChip: this.selectedChip,
+      selectedFile: this.selectedFile,
+      chipInfo: this.chipInfo,
+      job: this.job,
+      advanced: this.advanced,
+      fileCount: this.files.length,
+      chipResultCount: this.chipResults.length,
+      showAllFiles: this.showAllFiles,
+    });
     this.components.log.content = this.logLines.slice(-120).join("\n");
     this.components.footer.content = footerText();
     this.renderer?.root.requestRender();
