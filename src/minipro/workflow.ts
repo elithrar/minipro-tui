@@ -56,6 +56,19 @@ export type ReadWorkflowInput = {
   onLog?: (line: string) => void;
 };
 
+export type CompareWorkflowInput = {
+  file?: FileEntry;
+  chip?: string;
+  confirmed: boolean;
+  confirmedBytes?: Uint8Array;
+  confirmedSha256?: string;
+  advanced?: AdvancedOptions;
+  runCommand: WorkflowCommandRunner;
+  keepReadbackFile?: boolean;
+  readFileBytes?: (path: string) => Promise<Uint8Array>;
+  onLog?: (line: string) => void;
+};
+
 export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput): Promise<WorkflowResult> {
   const advanced = input.advanced ?? {};
   const preconditionError = validateWorkflowInput(input.file, input.chip, input.chipInfo, input.confirmed, advanced.allowSizeMismatch, input.confirmedBytes?.byteLength);
@@ -145,6 +158,55 @@ export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput):
     steps,
     originalSha256,
     readbackSha256,
+    readbackPath,
+  });
+}
+
+export async function runCompareWorkflow(input: CompareWorkflowInput): Promise<WorkflowResult> {
+  const advanced = input.advanced ?? {};
+  if (!input.file) return { ok: false, message: "Select a file before starting compare mode.", steps: [] };
+  if (!input.chip) return { ok: false, message: "Select a chip before starting compare mode.", steps: [] };
+  if (!input.confirmed) return { ok: false, message: "Confirm compare before starting.", steps: [] };
+  if (!input.confirmedBytes) return { ok: false, message: "Freeze selected file bytes before confirming compare mode.", steps: [] };
+
+  const steps: WorkflowStepResult[] = [];
+  const load = input.readFileBytes ?? readFile;
+  const localSha256 = input.confirmedSha256 ?? sha256Bytes(input.confirmedBytes);
+
+  const tempDir = await mkdtemp(join(tmpdir(), "minipro-tui-compare-"));
+  const readbackPath = join(tempDir, `${basename(input.file.path)}.chip-readback`);
+  const finish = async (result: WorkflowResult): Promise<WorkflowResult> => {
+    if (!input.keepReadbackFile) await rm(tempDir, { recursive: true, force: true });
+    return result;
+  };
+
+  input.onLog?.(`Compare local ${basename(input.file.path)}: ${input.confirmedBytes.byteLength} B sha256 ${localSha256}`);
+
+  const connected = await runStep(steps, input.runCommand, "detect programmer", buildDetectProgrammerArgs());
+  if (failed(connected)) return finish(fail("detect programmer", connected, steps, localSha256, readbackPath));
+  if (!parseProgrammerStatus(`${connected.stdout}\n${connected.stderr}`).connected) {
+    return finish({ ok: false, message: `No connected programmer detected. Local sha256 ${localSha256}.`, steps, originalSha256: localSha256, readbackPath });
+  }
+
+  const read = await runStep(steps, input.runCommand, "read chip for compare", buildReadArgs(input.chip, readbackPath, advanced));
+  if (failed(read)) return finish(fail("read chip for compare", read, steps, localSha256, readbackPath));
+
+  const loaded = await safeLoadReadback(load, readbackPath);
+  if (!loaded.ok) {
+    return finish({ ok: false, message: `${loaded.message}. Local sha256 ${localSha256}.`, steps, originalSha256: localSha256, readbackPath });
+  }
+
+  const chipSha256 = sha256Bytes(loaded.readbackBytes);
+  const matched = localSha256 === chipSha256;
+  const status = matched ? "matched" : "files do not match";
+  input.onLog?.(`Compare chip readback: ${loaded.readbackBytes.byteLength} B sha256 ${chipSha256}`);
+
+  return finish({
+    ok: matched,
+    message: `Compare ${status}. Local sha256 ${localSha256}. Chip sha256 ${chipSha256}.`,
+    steps,
+    originalSha256: localSha256,
+    readbackSha256: chipSha256,
     readbackPath,
   });
 }

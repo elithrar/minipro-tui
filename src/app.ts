@@ -28,7 +28,7 @@ import {
   runMinipro,
 } from "./minipro/commands";
 import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
-import { runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
+import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
 import { formatFileOption, formatStatusLine, formatStatusSummary } from "./tui/render";
 
@@ -224,6 +224,9 @@ export class MiniproTuiApp {
         case "v":
           void this.verifySelectedFile();
           break;
+        case "m":
+          void this.compareFlow();
+          break;
         case "w":
           void this.writeFlow();
           break;
@@ -355,7 +358,7 @@ export class MiniproTuiApp {
       return;
     }
 
-    const frozen = await freezeFileForWrite(this.selectedFile.path);
+    const frozen = await freezeFileForOperation(this.selectedFile.path);
     if (!frozen.ok) {
       this.appendLog(frozen.message);
       this.render();
@@ -461,6 +464,58 @@ export class MiniproTuiApp {
     if (result.ok) await this.refresh();
   }
 
+  private async compareFlow(): Promise<void> {
+    if (this.job.kind === "running") return;
+    if (!this.selectedChip || !this.selectedFile) {
+      this.appendLog("Cannot compare: select a chip and file first.");
+      this.render();
+      return;
+    }
+
+    const frozen = await freezeFileForOperation(this.selectedFile.path);
+    if (!frozen.ok) {
+      this.appendLog(frozen.message);
+      this.render();
+      return;
+    }
+
+    const confirmed = await this.confirmDialog(
+      "Compare Chip",
+      [
+        `Compare ${basename(this.selectedFile.path)} with the current contents of ${this.selectedChip}.`,
+        `Local file: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}`,
+        "",
+        JSON.stringify(["minipro", ...buildReadArgs(this.selectedChip, "<temp-compare-readback-file>", this.advanced)]),
+        "",
+        ...dangerousOptionWarnings(this.advanced),
+      ].join("\n"),
+      "Compare",
+    );
+    if (!confirmed) {
+      this.appendLog("Compare cancelled.");
+      return;
+    }
+
+    this.setJob({ kind: "running", step: "compare" });
+    const result = await runCompareWorkflow({
+      file: this.selectedFile,
+      chip: this.selectedChip,
+      confirmed: true,
+      confirmedBytes: frozen.bytes,
+      confirmedSha256: frozen.sha256,
+      advanced: this.advanced,
+      runCommand: (args, step) => {
+        this.setJob({ kind: "running", step });
+        return runMinipro(args, { onLog: (line) => this.appendLog(line) });
+      },
+      onLog: (line) => this.appendLog(line),
+    }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
+
+    this.appendLog(result.message);
+    this.setJob(result.ok ? { kind: "done", message: result.message } : { kind: "failed", step: "compare", message: result.message });
+    await this.message("Compare Result", result.message);
+  }
+
   private async advancedModal(): Promise<void> {
     const choice = await this.selectDialog("Advanced Controls", [
       { name: `Show all files: ${this.showAllFiles ? "on" : "off"}`, description: "Toggle current-folder file filter", value: "all" },
@@ -509,6 +564,7 @@ export class MiniproTuiApp {
         "Status: persistent operator summary for programmer, chip, image, size fit, safety options, and next action.",
         "Write path: check, erase, blank check, write, verify, readback compare, with confirmation.",
         "Read path: Shift+R, edit filename, choose Read or Cancel, then checksum is logged.",
+        "Compare path: m, compare the selected local file to a temporary chip readback, then show both hashes.",
       ].join("\n"),
     );
   }
@@ -775,7 +831,7 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
 }
 
 function footerText(): string {
-  return "q quit | r refresh | R read | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
+  return "q quit | r refresh | R read | m compare | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
 }
 
 function formatChipOptions(chips: string[]): SelectOption[] {
@@ -817,13 +873,13 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
-async function freezeFileForWrite(path: string): Promise<{ ok: true; bytes: Uint8Array; sha256: string } | { ok: false; message: string }> {
+async function freezeFileForOperation(path: string): Promise<{ ok: true; bytes: Uint8Array; sha256: string } | { ok: false; message: string }> {
   try {
     const before = await stat(path);
     const bytes = await readFile(path);
     const after = await stat(path);
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
-      return { ok: false, message: "Selected file changed while preparing the write. Refresh and reselect it before writing." };
+      return { ok: false, message: "Selected file changed while preparing the operation. Refresh and reselect it before continuing." };
     }
     return { ok: true, bytes, sha256: sha256Bytes(bytes) };
   } catch (error) {

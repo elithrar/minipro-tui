@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 
 import type { FileEntry, MiniproResult } from "../src/types";
-import { runDefaultWriteWorkflow, runReadWorkflow, type WorkflowCommandRunner } from "../src/minipro/workflow";
+import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type WorkflowCommandRunner } from "../src/minipro/workflow";
 
 test("default flow includes pin check, erase, blank check, write, verify, and readback compare", async () => {
   const dir = join(import.meta.dir, ".tmp-workflow");
@@ -170,6 +170,52 @@ test("read workflow requires confirmation", async () => {
   const result = await runReadWorkflow({ chip: "AT28C64B", outputFile: "read.bin", confirmed: false, runCommand: async (args) => ok(args) });
   expect(result.ok).toBe(false);
   expect(result.message).toContain("Confirm read");
+});
+
+test("compare workflow reports matched hashes", async () => {
+  const localBytes = new Uint8Array([1, 2, 3, 4]);
+  const calls: string[][] = [];
+  const result = await runCompareWorkflow({
+    file: fileEntry("image.bin", 4),
+    chip: "AT28C64B",
+    confirmed: true,
+    confirmedBytes: localBytes,
+    runCommand: async (args) => {
+      calls.push(args);
+      return ok(args, args[0] === "-k" ? "T48" : "");
+    },
+    readFileBytes: async () => localBytes,
+  });
+
+  expect(result.ok).toBe(true);
+  if (!result.readbackPath) throw new Error("Expected compare readback path.");
+  expect(result.message).toContain("matched");
+  expect(result.message).toContain("Local sha256");
+  expect(result.message).toContain("Chip sha256");
+  expect(result.originalSha256).toBe(result.readbackSha256);
+  expect(calls).toEqual([
+    ["-k"],
+    ["-p", "AT28C64B", "-r", result.readbackPath],
+  ]);
+});
+
+test("compare workflow reports mismatched hashes", async () => {
+  const localBytes = new Uint8Array([1, 2, 3, 4]);
+  const chipBytes = new Uint8Array([4, 3, 2, 1]);
+  const result = await runCompareWorkflow({
+    file: fileEntry("image.bin", 4),
+    chip: "AT28C64B",
+    confirmed: true,
+    confirmedBytes: localBytes,
+    runCommand: async (args) => ok(args, args[0] === "-k" ? "T48" : ""),
+    readFileBytes: async () => chipBytes,
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.message).toContain("files do not match");
+  expect(result.message).toContain("Local sha256");
+  expect(result.message).toContain("Chip sha256");
+  expect(result.originalSha256).not.toBe(result.readbackSha256);
 });
 
 function ok(command: string[], stdout = ""): MiniproResult {
