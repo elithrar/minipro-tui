@@ -6,6 +6,8 @@ import {
   createCliRenderer,
   InputRenderable,
   InputRenderableEvents,
+  RGBA,
+  RenderableEvents,
   SelectRenderable,
   SelectRenderableEvents,
   TextRenderable,
@@ -38,13 +40,14 @@ const PANEL = "#17171d";
 const MUTED = "#a8a8a8";
 const CONNECTED = "#238636";
 const DISCONNECTED = "#da3633";
+const CHROME_FG = RGBA.fromHex("#ffffff");
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
 const CHIP_INFO_PREFETCH_LIMIT = 12;
 
 type Components = {
-  statusBar: TextRenderable;
+  statusBarBox: BoxRenderable;
   filesPanel: BoxRenderable;
   files: SelectRenderable;
   chipPanel: BoxRenderable;
@@ -54,7 +57,7 @@ type Components = {
   statusSummary: TextRenderable;
   logPanel: BoxRenderable;
   log: TextRenderable;
-  footer: TextRenderable;
+  footerBox: BoxRenderable;
 };
 
 export class MiniproTuiApp {
@@ -77,6 +80,8 @@ export class MiniproTuiApp {
   private modalActive = false;
   private fileOptionsKey = "";
   private chipOptionsKey = "";
+  private statusLine = "";
+  private footerLine = footerText();
 
   async start(): Promise<void> {
     this.renderer = await createCliRenderer({
@@ -100,14 +105,7 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const statusBar = new TextRenderable(renderer, {
-      id: "status-bar",
-      height: 1,
-      width: "100%",
-      fg: "#ffffff",
-      bg: DISCONNECTED,
-      truncate: true,
-    });
+    const statusBarBox = lineBox(renderer, "status-bar-box", DISCONNECTED, () => this.statusLine);
 
     const main = new BoxRenderable(renderer, {
       id: "main",
@@ -167,28 +165,20 @@ export class MiniproTuiApp {
     const log = new TextRenderable(renderer, { id: "log", width: "100%", height: "100%", fg: "#e6e6e6", bg: PANEL, wrapMode: "word" });
     logPanel.add(log);
 
-    const footer = new TextRenderable(renderer, {
-      id: "footer",
-      height: 1,
-      width: "100%",
-      fg: "#ffffff",
-      bg: "#000000",
-      content: footerText(),
-      truncate: true,
-    });
+    const footerBox = lineBox(renderer, "footer", "#000000", () => this.footerLine);
 
     topRow.add(filesPanel);
     topRow.add(chipPanel);
     topRow.add(statusPanel);
     main.add(topRow);
     main.add(logPanel);
-    root.add(statusBar);
+    root.add(statusBarBox);
     root.add(main);
-    root.add(footer);
+    root.add(footerBox);
     renderer.root.add(root);
     files.focus();
 
-    return { statusBar, filesPanel, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footer };
+    return { statusBarBox, filesPanel, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footerBox };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -216,7 +206,12 @@ export class MiniproTuiApp {
       }
 
       if (key.name === "/") {
-        components.chipQuery.focus();
+        void this.searchChip(components.chipQuery.value.trim() || this.chipQuery || DEFAULT_CHIP_QUERY, false, true);
+        return;
+      }
+
+      if (key.name === "f") {
+        components.files.focus();
         this.render();
         return;
       }
@@ -261,7 +256,7 @@ export class MiniproTuiApp {
     });
 
     components.chipQuery.on(InputRenderableEvents.ENTER, (value: string) => {
-      void this.searchChip(value.trim() || DEFAULT_CHIP_QUERY, false);
+      void this.searchChip(value.trim() || DEFAULT_CHIP_QUERY, false, true);
     });
 
     components.files.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
@@ -271,6 +266,11 @@ export class MiniproTuiApp {
     components.chips.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
       void this.selectChip(String(option.value ?? option.name));
     });
+
+    for (const focusable of [components.files, components.chipQuery, components.chips]) {
+      focusable.on(RenderableEvents.FOCUSED, () => this.render());
+      focusable.on(RenderableEvents.BLURRED, () => this.render());
+    }
   }
 
   private async refresh(): Promise<void> {
@@ -298,7 +298,7 @@ export class MiniproTuiApp {
     this.render();
   }
 
-  private async searchChip(query: string, preferDefault: boolean): Promise<void> {
+  private async searchChip(query: string, preferDefault: boolean, focusResults = false): Promise<void> {
     if (this.job.kind === "running") return;
     this.chipQuery = query;
     const components = this.requireComponents();
@@ -312,6 +312,7 @@ export class MiniproTuiApp {
     const defaultChip = preferDefault ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY) : undefined;
     this.selectedChip = defaultChip;
     this.chipInfo = undefined;
+    if (focusResults) components.chips.focus();
     this.render();
 
     if (defaultChip) await this.selectChip(defaultChip);
@@ -774,14 +775,14 @@ export class MiniproTuiApp {
   private render(): void {
     if (!this.components) return;
     const focus = this.focusLabel();
-    this.components.statusBar.content = `${formatStatusLine({
+    this.statusLine = `${formatStatusLine({
       programmerStatus: this.programmerStatus,
       database: this.database,
       selectedChip: this.selectedChip,
       selectedFile: this.selectedFile,
       job: this.job,
-    })} | Focus: ${focus}`;
-    this.components.statusBar.bg = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
+    })} | Focus ${focus}`;
+    this.components.statusBarBox.backgroundColor = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
     const fileOptions = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
     this.updateSelectOptions(this.components.files, fileOptions, this.files.length > 0 ? this.files.map((file) => `${file.path}:${file.size}:${file.modifiedAt.getTime()}:${file.sha256Short}`).join("\n") : "<no-files>");
     this.setSelectedIndex(this.components.files, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
@@ -803,7 +804,7 @@ export class MiniproTuiApp {
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
     this.components.log.content = formatLogContent(this.logLines.slice(-120));
-    this.components.footer.content = `${footerText()} | focus ${focus}`;
+    this.footerLine = `${footerText()} | focus ${focus}`;
     this.renderer?.root.requestRender();
   }
 
@@ -866,6 +867,19 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
   });
 }
 
+function lineBox(renderer: CliRenderer, id: string, backgroundColor: string, getText: () => string): BoxRenderable {
+  return new BoxRenderable(renderer, {
+    id,
+    height: 1,
+    width: "100%",
+    backgroundColor,
+    padding: 0,
+    renderAfter: function (buffer) {
+      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY, CHROME_FG);
+    },
+  });
+}
+
 function selectOptions(id: string, height: number | `${number}%`): ConstructorParameters<typeof SelectRenderable>[1] {
   return {
     id,
@@ -907,7 +921,14 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
 }
 
 function footerText(): string {
-  return "q quit | r refresh | R read | m compare | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
+  return "q quit | f files | / chips | r refresh | R read | m compare | p programmer | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
+}
+
+function truncateEnd(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (value.length <= width) return value;
+  if (width <= 3) return ".".repeat(width);
+  return `${value.slice(0, width - 3)}...`;
 }
 
 function orderChipResults(chips: string[], query: string): string[] {

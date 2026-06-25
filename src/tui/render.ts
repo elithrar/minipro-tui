@@ -1,4 +1,4 @@
-import { StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
+import { RGBA, StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
 
 import type { AdvancedOptions, ChipInfo, FileEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
 import { formatBytes } from "../files/scan";
@@ -21,6 +21,8 @@ export type StatusSummaryOptions = {
 };
 
 const STATUS_LABEL_WIDTH = 7;
+const COMMAND_LOG_BG = RGBA.fromHex("#ff8700");
+const COMMAND_LOG_FG = RGBA.fromHex("#ffffff");
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
@@ -29,11 +31,18 @@ export function formatStatusLine(input: {
   selectedFile?: FileEntry;
   job: JobState;
 }): string {
-  const programmer = input.programmerStatus.connected ? `${input.programmerStatus.model ?? "connected"}` : "disconnected";
-  const file = input.selectedFile ? `${input.selectedFile.name} ${input.selectedFile.size} B ${input.selectedFile.sha256Short}` : "none";
-  const chip = input.selectedChip ?? "none";
+  const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
+  const file = input.selectedFile ? truncateMiddle(input.selectedFile.name, 30) : "no file";
+  const chip = input.selectedChip ? truncateMiddle(input.selectedChip, 24) : "no chip";
   const job = input.job.kind === "running" ? input.job.step : input.job.kind;
-  return ` minipro-tui | Programmer: ${programmer} | DB: ${input.database} | Chip: ${chip} | File: ${file} | ${job}`;
+  return ` minipro-tui | ${programmer} | ${input.database} | ${chip} | ${file} | ${job}`;
+}
+
+function truncateMiddle(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const marker = "...";
+  const half = Math.floor((maxLength - marker.length) / 2);
+  return `${value.slice(0, half)}${marker}${value.slice(value.length - (maxLength - half - marker.length))}`;
 }
 
 export function formatFileOption(file: FileEntry): { name: string; description: string; value: string } {
@@ -57,10 +66,13 @@ export function formatChipLabel(chip: string, info?: ChipInfo): { name: string; 
 export function formatLogContent(lines: string[]): StyledText {
   const chunks = lines.map((line, index) => {
     const suffix = index === lines.length - 1 ? "" : "\n";
+    const command = isCommandLogLine(line);
     return {
       __isChunk: true as const,
       text: `${sanitizeLogLine(line)}${suffix}`,
-      attributes: isCommandLogLine(line) ? TextAttributes.BOLD : undefined,
+      fg: command ? COMMAND_LOG_FG : undefined,
+      bg: command ? COMMAND_LOG_BG : undefined,
+      attributes: command ? TextAttributes.BOLD : undefined,
     };
   });
   return new StyledText(chunks);

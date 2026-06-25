@@ -10,19 +10,21 @@ test("status line shows disconnected programmer state", () => {
       database: "t48",
       job: { kind: "idle" },
     }),
-  ).toContain("Programmer: disconnected");
+  ).toContain("| disconnected | t48 |");
 });
 
-test("status line shows selected file details", () => {
-  expect(
-    formatStatusLine({
-      programmerStatus: { connected: true, model: "T48", kind: "t48", raw: "T48" },
-      database: "t48",
-      selectedChip: "AT28C64B",
-      selectedFile: { name: "image.bin", path: "image.bin", size: 8192, modifiedAt: new Date(0), sha256Short: "a1b2c3d4" },
-      job: { kind: "idle" },
-    }),
-  ).toContain("File: image.bin 8192 B a1b2c3d4");
+test("status line stays compact", () => {
+  const line = formatStatusLine({
+    programmerStatus: { connected: true, model: "T48", kind: "t48", raw: "T48" },
+    database: "t48",
+    selectedChip: "AT28C64B",
+    selectedFile: { name: "911 chip 89 911 28pin 3.bin", path: "image.bin", size: 8192, modifiedAt: new Date(0), sha256Short: "a1b2c3d4" },
+    job: { kind: "idle" },
+  });
+
+  expect(line).toContain("| T48 | t48 | AT28C64B | 911 chip 89 911 28pin 3.bin | idle");
+  expect(line).not.toContain("8192 B");
+  expect(line).not.toContain("a1b2c3d4");
 });
 
 test("status summary shows matching chip and image as ready", () => {
@@ -128,5 +130,8 @@ test("log formatting strips terminal escape sequences and bolds commands", () =>
   const content = formatLogContent(['$ ["minipro","-Q"]', "exit 0 in 25ms"]);
   expect(content.chunks[0]?.text).toBe('$ ["minipro","-Q"]\n');
   expect(content.chunks[0]?.attributes).toBe(TextAttributes.BOLD);
+  expect(content.chunks[0]?.bg?.toInts()).toEqual([255, 135, 0, 255]);
+  expect(content.chunks[0]?.fg?.toInts()).toEqual([255, 255, 255, 255]);
   expect(content.chunks[1]?.attributes).toBeUndefined();
+  expect(content.chunks[1]?.bg).toBeUndefined();
 });
