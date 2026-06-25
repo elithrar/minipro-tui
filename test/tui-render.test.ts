@@ -130,8 +130,8 @@ test("log formatting strips terminal escape sequences and bolds commands", () =>
   const content = formatLogContent(['$ ["minipro","-Q"]', "exit 0 in 25ms"]);
   expect(content.chunks[0]?.text).toBe('$ ["minipro","-Q"]\n');
   expect(content.chunks[0]?.attributes).toBe(TextAttributes.BOLD);
-  expect(content.chunks[0]?.bg?.toInts()).toEqual([255, 135, 0, 255]);
-  expect(content.chunks[0]?.fg?.toInts()).toEqual([255, 255, 255, 255]);
+  expect(content.chunks[0]?.bg?.toInts()).toEqual([40, 40, 40, 255]);
+  expect(content.chunks[0]?.fg?.toInts()).toEqual([250, 178, 131, 255]);
   expect(content.chunks[1]?.attributes).toBeUndefined();
   expect(content.chunks[1]?.bg).toBeUndefined();
 });

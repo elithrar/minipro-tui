@@ -34,13 +34,19 @@ import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
 import { formatChipLabel, formatFileOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
 
-const ORANGE = "#ff8700";
-const BG = "#101014";
-const PANEL = "#17171d";
-const MUTED = "#a8a8a8";
-const CONNECTED = "#238636";
-const DISCONNECTED = "#da3633";
-const CHROME_FG = RGBA.fromHex("#ffffff");
+const PRIMARY = "#fab283";
+const BG = "#0a0a0a";
+const PANEL = "#141414";
+const ELEMENT = "#1e1e1e";
+const ELEMENT_FOCUSED = "#282828";
+const BORDER = "#484848";
+const BORDER_ACTIVE = "#606060";
+const TEXT = "#eeeeee";
+const SELECTED_TEXT = "#0a0a0a";
+const MUTED = "#808080";
+const CONNECTED = "#11261a";
+const DISCONNECTED = "#2a1619";
+const CHROME_FG = RGBA.fromHex(TEXT);
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
@@ -131,10 +137,10 @@ export class MiniproTuiApp {
       value: DEFAULT_CHIP_QUERY,
       placeholder: "AT28C64B",
       width: "100%",
-      backgroundColor: "#22222a",
-      focusedBackgroundColor: "#2b2b34",
-      textColor: "#ffffff",
-      cursorColor: ORANGE,
+      backgroundColor: ELEMENT,
+      focusedBackgroundColor: ELEMENT_FOCUSED,
+      textColor: TEXT,
+      cursorColor: PRIMARY,
       marginBottom: 1,
     });
     const chips = new SelectRenderable(renderer, {
@@ -152,7 +158,7 @@ export class MiniproTuiApp {
       id: "status-summary",
       width: "100%",
       height: "100%",
-      fg: "#ffffff",
+      fg: TEXT,
       bg: PANEL,
       wrapMode: "none",
       truncate: false,
@@ -162,10 +168,10 @@ export class MiniproTuiApp {
     const logPanel = panel(renderer, "log-panel", "Actions / Log");
     logPanel.flexGrow = 1;
     logPanel.width = "100%";
-    const log = new TextRenderable(renderer, { id: "log", width: "100%", height: "100%", fg: "#e6e6e6", bg: PANEL, wrapMode: "word" });
+    const log = new TextRenderable(renderer, { id: "log", width: "100%", height: "100%", fg: TEXT, bg: PANEL, wrapMode: "word" });
     logPanel.add(log);
 
-    const footerBox = lineBox(renderer, "footer", "#000000", () => this.footerLine);
+    const footerBox = lineBox(renderer, "footer", BG, () => this.footerLine);
 
     topRow.add(filesPanel);
     topRow.add(chipPanel);
@@ -630,17 +636,17 @@ export class MiniproTuiApp {
     const maxHeight = maxModalHeight(renderer);
     const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 8));
     const modal = modalBox(renderer, title, textHeight + 8);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: "#ffffff", bg: PANEL, wrapMode: "word", marginBottom: 1 }));
+    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: TEXT, bg: PANEL, wrapMode: "word", marginBottom: 1 }));
     const buttons = new SelectRenderable(renderer, {
       ...selectOptions("confirm-buttons", 4),
       options: [
-        { name: "Cancel", description: "Do not run the command", value: "cancel" },
-        { name: confirmLabel, description: "Run the command shown above", value: "confirm" },
+        { name: "Cancel", description: "Return without continuing", value: "cancel" },
+        { name: confirmLabel, description: "Continue with this action", value: "confirm" },
       ],
       selectedIndex: 0,
     });
     modal.add(buttons);
-    modal.add(new TextRenderable(renderer, { content: "Enter = choose    Esc/q = Cancel", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
+    modal.add(new TextRenderable(renderer, { content: "Enter = Choose    Esc/q = Cancel", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
     renderer.root.add(modal);
     renderer.root.requestRender();
 
@@ -676,10 +682,10 @@ export class MiniproTuiApp {
     const input = new InputRenderable(renderer, {
       value: initialValue,
       width: "100%",
-      backgroundColor: "#22222a",
-      focusedBackgroundColor: "#2b2b34",
-      textColor: "#ffffff",
-      cursorColor: ORANGE,
+      backgroundColor: ELEMENT,
+      focusedBackgroundColor: ELEMENT_FOCUSED,
+      textColor: TEXT,
+      cursorColor: PRIMARY,
       marginTop: 1,
       marginBottom: 1,
     });
@@ -756,7 +762,34 @@ export class MiniproTuiApp {
   }
 
   private async message(title: string, content: string): Promise<void> {
-    await this.confirmDialog(title, content, "Close");
+    const renderer = this.requireRenderer();
+    this.modalActive = true;
+    const maxHeight = maxModalHeight(renderer);
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 5));
+    const modal = modalBox(renderer, title, textHeight + 5);
+    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: TEXT, bg: PANEL, wrapMode: "word", marginBottom: 1 }));
+    modal.add(new TextRenderable(renderer, { content: "Enter/Esc/q = Close", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
+    renderer.root.add(modal);
+    renderer.root.requestRender();
+
+    return new Promise((resolve) => {
+      const done = () => {
+        modal.onKeyDown = undefined;
+        renderer.root.remove(modal.id);
+        this.modalActive = false;
+        this.render();
+        resolve();
+      };
+      modal.onKeyDown = (key: KeyEvent) => {
+        if (isCancelKey(key) || isKey(key, "q") || key.name === "enter" || key.sequence === "\r" || key.sequence === "\n") {
+          key.preventDefault();
+          key.stopPropagation();
+          done();
+        }
+      };
+      modal.focusable = true;
+      modal.focus();
+    });
   }
 
   private focusNext(): void {
@@ -862,11 +895,11 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
   return new BoxRenderable(renderer, {
     id,
     title: ` ${title} `,
-    titleColor: ORANGE,
+    titleColor: PRIMARY,
     border: true,
-    borderStyle: "rounded",
-    borderColor: "#555560",
-    focusedBorderColor: ORANGE,
+    borderStyle: "single",
+    borderColor: BORDER,
+    focusedBorderColor: BORDER_ACTIVE,
     backgroundColor: PANEL,
     padding: 1,
     flexGrow: 1,
@@ -896,12 +929,12 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
     options: [],
     backgroundColor: PANEL,
     focusedBackgroundColor: PANEL,
-    textColor: "#ffffff",
-    focusedTextColor: "#ffffff",
-    selectedBackgroundColor: ORANGE,
-    selectedTextColor: "#ffffff",
+    textColor: TEXT,
+    focusedTextColor: TEXT,
+    selectedBackgroundColor: PRIMARY,
+    selectedTextColor: SELECTED_TEXT,
     descriptionColor: MUTED,
-    selectedDescriptionColor: "#ffffff",
+    selectedDescriptionColor: SELECTED_TEXT,
     showScrollIndicator: true,
     wrapSelection: true,
   };
@@ -912,7 +945,7 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
   return new BoxRenderable(renderer, {
     id: `modal-${Date.now()}`,
     title: ` ${title} `,
-    titleColor: ORANGE,
+    titleColor: PRIMARY,
     position: "absolute",
     zIndex: 100,
     top: Math.max(1, Math.floor((renderer.height - modalHeight) / 2)),
@@ -920,9 +953,9 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
     width: "90%",
     height: modalHeight,
     border: true,
-    borderStyle: "rounded",
-    borderColor: ORANGE,
-    focusedBorderColor: ORANGE,
+    borderStyle: "single",
+    borderColor: BORDER_ACTIVE,
+    focusedBorderColor: PRIMARY,
     backgroundColor: PANEL,
     padding: 1,
     flexDirection: "column",
@@ -976,8 +1009,8 @@ function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>): 
 
 function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): void {
   panel.title = focused ? ` > ${title} ` : ` ${title} `;
-  panel.titleColor = focused ? "#ffffff" : ORANGE;
-  panel.borderColor = focused ? ORANGE : "#555560";
+  panel.titleColor = focused ? TEXT : PRIMARY;
+  panel.borderColor = focused ? PRIMARY : BORDER;
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {

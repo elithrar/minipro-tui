@@ -21,8 +21,8 @@ export type StatusSummaryOptions = {
 };
 
 const STATUS_LABEL_WIDTH = 7;
-const COMMAND_LOG_BG = RGBA.fromHex("#ff8700");
-const COMMAND_LOG_FG = RGBA.fromHex("#ffffff");
+const COMMAND_LOG_BG = RGBA.fromHex("#282828");
+const COMMAND_LOG_FG = RGBA.fromHex("#fab283");
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
