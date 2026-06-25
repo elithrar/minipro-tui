@@ -622,8 +622,9 @@ export class MiniproTuiApp {
   private async confirmDialog(title: string, content: string, confirmLabel: string): Promise<boolean> {
     const renderer = this.requireRenderer();
     this.modalActive = true;
-    const textHeight = Math.min(12, Math.max(3, content.split("\n").length));
-    const modal = modalBox(renderer, title, Math.min(20, textHeight + 8));
+    const maxHeight = maxModalHeight(renderer);
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 8));
+    const modal = modalBox(renderer, title, textHeight + 8);
     modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: "#ffffff", bg: PANEL, wrapMode: "word", marginBottom: 1 }));
     const buttons = new SelectRenderable(renderer, {
       ...selectOptions("confirm-buttons", 4),
@@ -712,7 +713,9 @@ export class MiniproTuiApp {
   private async selectDialog(title: string, options: SelectOption[], selectedIndex = 0): Promise<SelectOption | undefined> {
     const renderer = this.requireRenderer();
     this.modalActive = true;
-    const modalHeight = Math.min(19, Math.max(10, options.length * 2 + 6));
+    const rowsPerOption = options.some((option) => option.description) ? 2 : 1;
+    const desiredSelectHeight = Math.max(4, options.length * rowsPerOption);
+    const modalHeight = clamp(desiredSelectHeight + 7, 10, maxModalHeight(renderer));
     const modal = modalBox(renderer, title, modalHeight);
     const select = new SelectRenderable(renderer, {
       ...selectOptions("modal-select", Math.max(4, modalHeight - 7)),
@@ -804,7 +807,7 @@ export class MiniproTuiApp {
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
     this.components.log.content = formatLogContent(this.logLines.slice(-120));
-    this.footerLine = `${footerText()} | focus ${focus}`;
+    this.footerLine = footerText();
     this.renderer?.root.requestRender();
   }
 
@@ -900,16 +903,17 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
 }
 
 function modalBox(renderer: CliRenderer, title: string, height: number): BoxRenderable {
+  const modalHeight = clamp(height, 6, maxModalHeight(renderer));
   return new BoxRenderable(renderer, {
     id: `modal-${Date.now()}`,
     title: ` ${title} `,
     titleColor: ORANGE,
     position: "absolute",
     zIndex: 100,
-    top: 3,
-    left: "10%",
-    width: "80%",
-    height,
+    top: Math.max(1, Math.floor((renderer.height - modalHeight) / 2)),
+    left: "5%",
+    width: "90%",
+    height: modalHeight,
     border: true,
     borderStyle: "rounded",
     borderColor: ORANGE,
@@ -918,6 +922,22 @@ function modalBox(renderer: CliRenderer, title: string, height: number): BoxRend
     padding: 1,
     flexDirection: "column",
   });
+}
+
+function maxModalHeight(renderer: CliRenderer): number {
+  return Math.max(6, renderer.height - 4);
+}
+
+function modalInnerWidth(renderer: CliRenderer): number {
+  return Math.max(20, Math.floor(renderer.width * 0.9) - 4);
+}
+
+function estimateWrappedRows(content: string, width: number): number {
+  return content.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / width)), 0);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
 }
 
 function footerText(): string {
