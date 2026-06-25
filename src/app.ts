@@ -259,8 +259,12 @@ export class MiniproTuiApp {
       void this.searchChip(value.trim() || DEFAULT_CHIP_QUERY, false, true);
     });
 
+    components.files.on(SelectRenderableEvents.SELECTION_CHANGED, (_index: number, option: SelectOption | null) => {
+      this.selectFileByPath(String(option?.value ?? ""));
+    });
+
     components.files.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
-      this.selectFileByPath(String(option.value ?? ""));
+      this.selectFileByPath(String(option.value ?? ""), true);
     });
 
     components.chips.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
@@ -318,12 +322,13 @@ export class MiniproTuiApp {
     if (defaultChip) await this.selectChip(defaultChip);
   }
 
-  private selectFileByPath(path: string): void {
+  private selectFileByPath(path: string, logSelection = false): void {
     const file = this.files.find((entry) => entry.path === path);
     if (!file) return;
+    const changed = this.selectedFile?.path !== file.path;
     this.selectedFile = file;
-    this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
-    this.render();
+    if (logSelection) this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
+    else if (changed) this.render();
   }
 
   private async selectChip(chip: string): Promise<void> {
