@@ -32,6 +32,7 @@ import {
 import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
 import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
+import { DialogController } from "./tui/dialogs";
 import { formatChipLabel, formatFileOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
 
 const PRIMARY = "#fab283";
@@ -88,6 +89,26 @@ export class MiniproTuiApp {
   private chipOptionsKey = "";
   private statusLine = "";
   private footerLine = footerText();
+  private readonly dialogs = new DialogController({
+    getRenderer: () => this.requireRenderer(),
+    theme: {
+      primary: PRIMARY,
+      panel: PANEL,
+      element: ELEMENT,
+      elementFocused: ELEMENT_FOCUSED,
+      borderActive: BORDER_ACTIVE,
+      text: TEXT,
+      selectedText: SELECTED_TEXT,
+      muted: MUTED,
+    },
+    onOpen: () => {
+      this.modalActive = true;
+    },
+    onClose: () => {
+      this.modalActive = false;
+      this.render();
+    },
+  });
 
   async start(): Promise<void> {
     this.renderer = await createCliRenderer({
@@ -253,7 +274,7 @@ export class MiniproTuiApp {
           void this.advancedModal();
           break;
         case "l":
-          void this.message("Full Log", this.logLines.join("\n") || "No log output yet.");
+          void this.dialogs.message("Full Log", this.logLines.join("\n") || "No log output yet.");
           break;
         case "?":
           void this.help();
@@ -364,7 +385,7 @@ export class MiniproTuiApp {
   private async pickProgrammerDatabase(): Promise<void> {
     if (this.job.kind === "running") return;
     const kinds = this.programmerDatabases.length > 0 ? this.programmerDatabases.map((db) => db.kind) : ["tl866a", "tl866ii", "t48", "t56"];
-    const choice = await this.selectDialog(
+    const choice = await this.dialogs.select(
       "Programmer Database",
       kinds.map((kind) => ({ name: kind, description: kind === this.database ? "current" : "", value: kind })),
       kinds.indexOf(this.database),
@@ -420,7 +441,7 @@ export class MiniproTuiApp {
     const preview = buildDefaultWritePreview(this.selectedChip, this.selectedFile.path, this.database, this.advanced)
       .map((args) => JSON.stringify(["minipro", ...args]))
       .join("\n");
-    const confirmed = await this.confirmDialog(
+    const confirmed = await this.dialogs.confirm(
       "Write Chip",
       [
         `This will check, erase, write, verify, and read back ${basename(this.selectedFile.path)} to ${this.selectedChip}.`,
@@ -438,7 +459,7 @@ export class MiniproTuiApp {
     }
 
     if (hasDangerousOptions(this.advanced)) {
-      const confirmDanger = await this.confirmDialog("Dangerous Options", dangerousOptionWarnings(this.advanced).join("\n"), "Continue");
+      const confirmDanger = await this.dialogs.confirm("Dangerous Options", dangerousOptionWarnings(this.advanced).join("\n"), "Continue");
       if (!confirmDanger) {
         this.appendLog("Write flow cancelled because dangerous options were not confirmed.");
         return;
@@ -474,21 +495,21 @@ export class MiniproTuiApp {
       return;
     }
 
-    const outputFile = await this.filenameDialog("Read Chip", defaultReadFilename(this.selectedChip));
+    const outputFile = await this.dialogs.filename("Read Chip", defaultReadFilename(this.selectedChip));
     if (!outputFile) {
       this.appendLog("Read cancelled.");
       return;
     }
 
     if (await fileExists(outputFile)) {
-      const overwrite = await this.confirmDialog("Overwrite File", `${outputFile} already exists. Overwrite it?`, "Overwrite");
+      const overwrite = await this.dialogs.confirm("Overwrite File", `${outputFile} already exists. Overwrite it?`, "Overwrite");
       if (!overwrite) {
         this.appendLog("Read cancelled to avoid overwriting an existing file.");
         return;
       }
     }
 
-    const confirmed = await this.confirmDialog(
+    const confirmed = await this.dialogs.confirm(
       "Read Chip",
       [`Read ${this.selectedChip} to:`, outputFile, "", JSON.stringify(["minipro", ...buildReadArgs(this.selectedChip, outputFile, this.advanced)]), "", ...dangerousOptionWarnings(this.advanced)].join("\n"),
       "Read",
@@ -531,7 +552,7 @@ export class MiniproTuiApp {
       return;
     }
 
-    const confirmed = await this.confirmDialog(
+    const confirmed = await this.dialogs.confirm(
       "Compare Chip",
       [
         `Compare ${basename(this.selectedFile.path)} with the current contents of ${this.selectedChip}.`,
@@ -565,11 +586,11 @@ export class MiniproTuiApp {
 
     this.appendLog(result.message);
     this.setJob(result.ok ? { kind: "done", message: result.message } : { kind: "failed", step: "compare", message: result.message });
-    await this.message("Compare Result", result.message);
+    await this.dialogs.message("Compare Result", result.message);
   }
 
   private async advancedModal(): Promise<void> {
-    const choice = await this.selectDialog("Advanced Controls", [
+    const choice = await this.dialogs.select("Advanced Controls", [
       { name: `Show all files: ${this.showAllFiles ? "on" : "off"}`, description: "Toggle current-folder file filter", value: "all" },
       { name: `Allow size mismatch: ${this.advanced.allowSizeMismatch ? "on" : "off"}`, description: "Dangerous: permits file/chip size mismatch", value: "s" },
       { name: `Disable readback compare: ${this.advanced.disableReadbackCompare ? "on" : "off"}`, description: "Dangerous: skips post-write byte compare", value: "r" },
@@ -607,7 +628,7 @@ export class MiniproTuiApp {
   }
 
   private async help(): Promise<void> {
-    await this.message(
+    await this.dialogs.message(
       "Help",
       [
         footerText(),
@@ -623,173 +644,11 @@ export class MiniproTuiApp {
 
   private async quit(): Promise<void> {
     if (this.job.kind === "running") {
-      await this.message("Job Running", "A hardware command is running. Quit is disabled until the command exits.");
+      await this.dialogs.message("Job Running", "A hardware command is running. Quit is disabled until the command exits.");
       return;
     }
     this.renderer?.destroy();
     process.exit(0);
-  }
-
-  private async confirmDialog(title: string, content: string, confirmLabel: string): Promise<boolean> {
-    const renderer = this.requireRenderer();
-    this.modalActive = true;
-    const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 8));
-    const modal = modalBox(renderer, title, textHeight + 8);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: TEXT, bg: PANEL, wrapMode: "word", marginBottom: 1 }));
-    const buttons = new SelectRenderable(renderer, {
-      ...selectOptions("confirm-buttons", 4),
-      options: [
-        { name: "Cancel", description: "Return without continuing", value: "cancel" },
-        { name: confirmLabel, description: "Continue with this action", value: "confirm" },
-      ],
-      selectedIndex: 0,
-    });
-    modal.add(buttons);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Choose    Esc/q = Cancel", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
-    renderer.root.add(modal);
-    renderer.root.requestRender();
-
-    return new Promise((resolve) => {
-      const done = (value: boolean) => {
-        buttons.onKeyDown = undefined;
-        buttons.off(SelectRenderableEvents.ITEM_SELECTED, selected);
-        renderer.root.remove(modal.id);
-        this.modalActive = false;
-        this.render();
-        resolve(value);
-      };
-      const selected = (_index: number, option: SelectOption) => done(option.value === "confirm");
-      const handler = (key: KeyEvent) => {
-        if (isCancelKey(key) || isKey(key, "q") || isKey(key, "n")) {
-          key.preventDefault();
-          key.stopPropagation();
-          done(false);
-          return;
-        }
-      };
-      buttons.on(SelectRenderableEvents.ITEM_SELECTED, selected);
-      buttons.onKeyDown = handler;
-      buttons.focus();
-    });
-  }
-
-  private async filenameDialog(title: string, initialValue: string): Promise<string | undefined> {
-    const renderer = this.requireRenderer();
-    this.modalActive = true;
-    const modal = modalBox(renderer, title, 9);
-    modal.add(new TextRenderable(renderer, { content: "Output filename:", width: "100%", height: 1, fg: MUTED, bg: PANEL }));
-    const input = new InputRenderable(renderer, {
-      value: initialValue,
-      width: "100%",
-      backgroundColor: ELEMENT,
-      focusedBackgroundColor: ELEMENT_FOCUSED,
-      textColor: TEXT,
-      cursorColor: PRIMARY,
-      marginTop: 1,
-      marginBottom: 1,
-    });
-    modal.add(input);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Read    Esc = Cancel", width: "100%", height: 1, fg: MUTED, bg: PANEL }));
-    renderer.root.add(modal);
-    renderer.root.requestRender();
-
-    return new Promise((resolve) => {
-      const done = (value: string | undefined) => {
-        input.onKeyDown = undefined;
-        input.off(InputRenderableEvents.ENTER, submit);
-        renderer.root.remove(modal.id);
-        this.modalActive = false;
-        this.render();
-        resolve(value);
-      };
-      const submit = (value: string) => done(value.trim() || undefined);
-      const handler = (key: KeyEvent) => {
-        if (isCancelKey(key)) {
-          key.preventDefault();
-          key.stopPropagation();
-          done(undefined);
-          return;
-        }
-      };
-      input.on(InputRenderableEvents.ENTER, submit);
-      input.onKeyDown = handler;
-      setTimeout(() => {
-        input.focus();
-        renderer.root.requestRender();
-      }, 0);
-    });
-  }
-
-  private async selectDialog(title: string, options: SelectOption[], selectedIndex = 0): Promise<SelectOption | undefined> {
-    const renderer = this.requireRenderer();
-    this.modalActive = true;
-    const rowsPerOption = options.some((option) => option.description) ? 2 : 1;
-    const desiredSelectHeight = Math.max(4, options.length * rowsPerOption);
-    const modalHeight = clamp(desiredSelectHeight + 7, 10, maxModalHeight(renderer));
-    const modal = modalBox(renderer, title, modalHeight);
-    const select = new SelectRenderable(renderer, {
-      ...selectOptions("modal-select", Math.max(4, modalHeight - 7)),
-      options,
-      selectedIndex: Math.max(0, selectedIndex),
-    });
-    modal.add(select);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Select    Esc/q = Cancel", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
-    renderer.root.add(modal);
-
-    return new Promise((resolve) => {
-      const done = (value: SelectOption | undefined) => {
-        select.onKeyDown = undefined;
-        select.off(SelectRenderableEvents.ITEM_SELECTED, selected);
-        renderer.root.remove(modal.id);
-        this.modalActive = false;
-        this.render();
-        resolve(value);
-      };
-      const selected = (_index: number, option: SelectOption) => done(option);
-      const handler = (key: KeyEvent) => {
-        if (isCancelKey(key) || isKey(key, "q")) {
-          key.preventDefault();
-          key.stopPropagation();
-          done(undefined);
-          return;
-        }
-      };
-      select.on(SelectRenderableEvents.ITEM_SELECTED, selected);
-      select.onKeyDown = handler;
-      select.focus();
-    });
-  }
-
-  private async message(title: string, content: string): Promise<void> {
-    const renderer = this.requireRenderer();
-    this.modalActive = true;
-    const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 5));
-    const modal = modalBox(renderer, title, textHeight + 5);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: TEXT, bg: PANEL, wrapMode: "word", marginBottom: 1 }));
-    modal.add(new TextRenderable(renderer, { content: "Enter/Esc/q = Close", width: "100%", height: 1, fg: MUTED, bg: PANEL, marginTop: 1 }));
-    renderer.root.add(modal);
-    renderer.root.requestRender();
-
-    return new Promise((resolve) => {
-      const done = () => {
-        modal.onKeyDown = undefined;
-        renderer.root.remove(modal.id);
-        this.modalActive = false;
-        this.render();
-        resolve();
-      };
-      modal.onKeyDown = (key: KeyEvent) => {
-        if (isCancelKey(key) || isKey(key, "q") || key.name === "enter" || key.sequence === "\r" || key.sequence === "\n") {
-          key.preventDefault();
-          key.stopPropagation();
-          done();
-        }
-      };
-      modal.focusable = true;
-      modal.focus();
-    });
   }
 
   private focusNext(): void {
@@ -941,44 +800,6 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
   };
 }
 
-function modalBox(renderer: CliRenderer, title: string, height: number): BoxRenderable {
-  const modalHeight = clamp(height, 6, maxModalHeight(renderer));
-  return new BoxRenderable(renderer, {
-    id: `modal-${Date.now()}`,
-    title: ` ${title} `,
-    titleColor: PRIMARY,
-    position: "absolute",
-    zIndex: 100,
-    top: Math.max(1, Math.floor((renderer.height - modalHeight) / 2)),
-    left: "5%",
-    width: "90%",
-    height: modalHeight,
-    border: true,
-    borderStyle: "single",
-    borderColor: BORDER_ACTIVE,
-    focusedBorderColor: PRIMARY,
-    backgroundColor: PANEL,
-    padding: 1,
-    flexDirection: "column",
-  });
-}
-
-function maxModalHeight(renderer: CliRenderer): number {
-  return Math.max(6, renderer.height - 4);
-}
-
-function modalInnerWidth(renderer: CliRenderer): number {
-  return Math.max(20, Math.floor(renderer.width * 0.9) - 4);
-}
-
-function estimateWrappedRows(content: string, width: number): number {
-  return content.split("\n").reduce((rows, line) => rows + Math.max(1, Math.ceil(line.length / width)), 0);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(value, max));
-}
-
 function footerText(): string {
   return "q quit | f files | / chips | r refresh | R read | m compare | p programmer | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
 }
@@ -1016,14 +837,6 @@ function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): v
 
 function isProgrammerKind(value: string): value is ProgrammerKind {
   return value === "tl866a" || value === "tl866ii" || value === "t48" || value === "t56";
-}
-
-function isCancelKey(key: KeyEvent): boolean {
-  return key.name === "escape" || key.name === "esc" || key.raw === "\x1b" || key.sequence === "\x1b" || (key.ctrl && key.name === "c");
-}
-
-function isKey(key: KeyEvent, value: string): boolean {
-  return key.name === value || key.sequence === value || key.raw === value;
 }
 
 function defaultReadFilename(chip: string): string {

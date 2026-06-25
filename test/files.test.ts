@@ -1,4 +1,4 @@
-import { mkdir, utimes, writeFile } from "node:fs/promises";
+import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, test } from "bun:test";
@@ -45,10 +45,22 @@ test("hash cache invalidates when file size or mtime changes", async () => {
   await mkdir(dir, { recursive: true });
   const path = join(dir, "image.bin");
   await writeFile(path, new Uint8Array([1]));
-  const first = await sha256File(path, 1, 1);
+  const firstStat = await stat(path);
+  const first = await sha256File(path, firstStat.size, firstStat.mtimeMs);
   await writeFile(path, new Uint8Array([2, 3]));
-  const second = await sha256File(path, 2, 2);
+  const secondStat = await stat(path);
+  const second = await sha256File(path, secondStat.size, secondStat.mtimeMs);
   expect(second).not.toEqual(first);
+});
+
+test("hashing rejects stale file metadata", async () => {
+  clearHashCache();
+  const dir = join(import.meta.dir, ".tmp-hash");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "stale.bin");
+  await writeFile(path, new Uint8Array([1]));
+
+  await expect(sha256File(path, 1, 1)).rejects.toThrow("File changed while hashing.");
 });
 
 test("short SHA output is stable", () => {
