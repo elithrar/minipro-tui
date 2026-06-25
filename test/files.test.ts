@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, test } from "bun:test";
@@ -22,6 +22,21 @@ test("file scanner can include all files", async () => {
   await writeFile(join(dir, "notes.txt"), "hello");
   const files = await scanFiles(dir, true);
   expect(files.map((file) => file.name)).toEqual(["image.bin", "notes.txt"]);
+});
+
+test("file scanner orders files by newest modified time first", async () => {
+  const dir = join(import.meta.dir, ".tmp-files-sort");
+  await mkdir(dir, { recursive: true });
+  const older = join(dir, "older.bin");
+  const newer = join(dir, "newer.bin");
+  await writeFile(older, new Uint8Array([1]));
+  await writeFile(newer, new Uint8Array([2]));
+  await utimes(older, new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+  await utimes(newer, new Date("2026-01-02T00:00:00Z"), new Date("2026-01-02T00:00:00Z"));
+
+  const files = await scanFiles(dir);
+
+  expect(files.map((file) => file.name)).toEqual(["newer.bin", "older.bin"]);
 });
 
 test("hash cache invalidates when file size or mtime changes", async () => {

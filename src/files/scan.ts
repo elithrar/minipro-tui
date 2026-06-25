@@ -55,5 +55,7 @@ function compareFileEntries(a: FileEntry, b: FileEntry): number {
   const aLikely = isLikelyProgrammingFile(a.name);
   const bLikely = isLikelyProgrammingFile(b.name);
   if (aLikely !== bLikely) return aLikely ? -1 : 1;
+  const modified = b.modifiedAt.getTime() - a.modifiedAt.getTime();
+  if (modified !== 0) return modified;
   return a.name.localeCompare(b.name);
 }

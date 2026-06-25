@@ -111,7 +111,7 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const statusBarBox = lineBox(renderer, "status-bar-box", DISCONNECTED, () => this.statusLine);
+    const statusBarBox = lineBox(renderer, "status-bar-box", DISCONNECTED, () => this.statusLine, 2);
 
     const main = new BoxRenderable(renderer, {
       id: "main",
@@ -845,6 +845,7 @@ export class MiniproTuiApp {
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
     this.components.log.content = formatLogContent(this.logLines.slice(-120));
+    this.components.log.scrollY = this.components.log.maxScrollY;
     this.footerLine = footerText();
     this.renderer?.root.requestRender();
   }
@@ -908,15 +909,15 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
   });
 }
 
-function lineBox(renderer: CliRenderer, id: string, backgroundColor: string, getText: () => string): BoxRenderable {
+function lineBox(renderer: CliRenderer, id: string, backgroundColor: string, getText: () => string, height = 1): BoxRenderable {
   return new BoxRenderable(renderer, {
     id,
-    height: 1,
+    height,
     width: "100%",
     backgroundColor,
     padding: 0,
     renderAfter: function (buffer) {
-      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY, CHROME_FG);
+      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY + this.height - 1, CHROME_FG);
     },
   });
 }
