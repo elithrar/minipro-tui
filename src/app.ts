@@ -30,7 +30,7 @@ import {
 import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
 import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
-import { formatFileOption, formatStatusLine, formatStatusSummary } from "./tui/render";
+import { formatChipLabel, formatFileOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
 
 const ORANGE = "#ff8700";
 const BG = "#101014";
@@ -40,13 +40,19 @@ const CONNECTED = "#238636";
 const DISCONNECTED = "#da3633";
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
+const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
+const CHIP_INFO_PREFETCH_LIMIT = 12;
 
 type Components = {
   statusBar: TextRenderable;
+  filesPanel: BoxRenderable;
   files: SelectRenderable;
+  chipPanel: BoxRenderable;
   chipQuery: InputRenderable;
   chips: SelectRenderable;
+  statusPanel: BoxRenderable;
   statusSummary: TextRenderable;
+  logPanel: BoxRenderable;
   log: TextRenderable;
   footer: TextRenderable;
 };
@@ -60,6 +66,7 @@ export class MiniproTuiApp {
   private files: FileEntry[] = [];
   private chipQuery = DEFAULT_CHIP_QUERY;
   private chipResults: string[] = [];
+  private chipInfoCache = new Map<string, ChipInfo>();
   private selectedFile: FileEntry | undefined;
   private selectedChip: string | undefined;
   private chipInfo: ChipInfo | undefined;
@@ -68,6 +75,8 @@ export class MiniproTuiApp {
   private showAllFiles = false;
   private advanced: AdvancedOptions = { ...DEFAULT_ADVANCED_OPTIONS };
   private modalActive = false;
+  private fileOptionsKey = "";
+  private chipOptionsKey = "";
 
   async start(): Promise<void> {
     this.renderer = await createCliRenderer({
@@ -179,7 +188,7 @@ export class MiniproTuiApp {
     renderer.root.add(root);
     files.focus();
 
-    return { statusBar, files, chipQuery, chips, statusSummary, log, footer };
+    return { statusBar, filesPanel, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footer };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -208,6 +217,7 @@ export class MiniproTuiApp {
 
       if (key.name === "/") {
         components.chipQuery.focus();
+        this.render();
         return;
       }
 
@@ -268,6 +278,8 @@ export class MiniproTuiApp {
     this.appendLog("Refreshing files and programmer status.");
 
     this.files = await scanFiles(process.cwd(), this.showAllFiles);
+    const selectedPath = this.selectedFile?.path;
+    this.selectedFile = selectedPath ? this.files.find((entry) => entry.path === selectedPath) : undefined;
     if (!this.selectedFile && this.files.length > 0) this.selectedFile = this.files[0];
 
     const databases = await runMinipro(["-Q"], { onLog: (line) => this.appendLog(line) });
@@ -278,7 +290,10 @@ export class MiniproTuiApp {
 
     const status = await runMinipro(["-k"], { onLog: (line) => this.appendLog(line) });
     this.programmerStatus = parseProgrammerStatus(`${status.stdout}\n${status.stderr}`);
-    if (this.programmerStatus.kind) this.database = this.programmerStatus.kind;
+    if (this.programmerStatus.kind && this.programmerStatus.kind !== this.database) {
+      this.database = this.programmerStatus.kind;
+      this.chipInfoCache.clear();
+    }
     this.job = { kind: "idle" };
     this.render();
   }
@@ -290,7 +305,9 @@ export class MiniproTuiApp {
     components.chipQuery.value = query;
     this.appendLog(`Searching ${this.database} database for ${query}.`);
     const result = await runMinipro(buildSearchChipsArgs(this.database, query), { onLog: (line) => this.appendLog(line) });
-    this.chipResults = result.exitCode === 0 ? parseChipSearch(result.stdout) : [];
+    this.chipResults = orderChipResults(result.exitCode === 0 ? parseChipSearch(result.stdout) : [], query);
+
+    await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT));
 
     const defaultChip = preferDefault ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY) : undefined;
     this.selectedChip = defaultChip;
@@ -315,7 +332,21 @@ export class MiniproTuiApp {
     const result = await runMinipro(buildChipInfoArgs(this.database, chip), { onLog: (line) => this.appendLog(line) });
     this.chipInfo = parseChipInfo(result.stdout);
     if (!this.chipInfo.name) this.chipInfo.name = chip;
+    if (this.chipInfo.raw.trim()) this.chipInfoCache.set(chip, this.chipInfo);
     this.render();
+  }
+
+  private async prefetchChipInfo(chips: string[]): Promise<void> {
+    const missing = chips.filter((chip) => !this.chipInfoCache.has(chip));
+    await Promise.all(
+      missing.map(async (chip) => {
+        const result = await runMinipro(buildChipInfoArgs(this.database, chip));
+        if (result.exitCode !== 0 || !result.stdout.trim()) return;
+        const info = parseChipInfo(result.stdout);
+        if (!info.name) info.name = chip;
+        this.chipInfoCache.set(chip, info);
+      }),
+    );
   }
 
   private async pickProgrammerDatabase(): Promise<void> {
@@ -328,6 +359,7 @@ export class MiniproTuiApp {
     );
     if (!choice || !isProgrammerKind(String(choice.value))) return;
     this.database = String(choice.value) as ProgrammerKind;
+    this.chipInfoCache.clear();
     this.selectedChip = undefined;
     this.chipInfo = undefined;
     this.appendLog(`Selected programmer database ${this.database}.`);
@@ -723,6 +755,7 @@ export class MiniproTuiApp {
     const focusables = [components.files, components.chipQuery, components.chips];
     const current = focusables.findIndex((item) => item.focused);
     focusables[(current + 1) % focusables.length]?.focus();
+    this.render();
   }
 
   private setJob(job: JobState): void {
@@ -731,28 +764,31 @@ export class MiniproTuiApp {
   }
 
   private appendLog(line: string): void {
-    for (const part of line.split(/\r?\n/)) {
-      if (part.trim()) this.logLines.push(part);
+    for (const part of line.split(/\r?\n|\r/)) {
+      const sanitized = sanitizeLogLine(part);
+      if (sanitized.trim()) this.logLines.push(sanitized);
     }
     this.render();
   }
 
   private render(): void {
     if (!this.components) return;
-    this.components.statusBar.content = formatStatusLine({
+    const focus = this.focusLabel();
+    this.components.statusBar.content = `${formatStatusLine({
       programmerStatus: this.programmerStatus,
       database: this.database,
       selectedChip: this.selectedChip,
       selectedFile: this.selectedFile,
       job: this.job,
-    });
+    })} | Focus: ${focus}`;
     this.components.statusBar.bg = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
     const fileOptions = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
-    this.components.files.options = fileOptions;
-    this.components.files.selectedIndex = Math.max(0, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
-    const chipOptions = formatChipOptions(this.chipResults);
-    this.components.chips.options = chipOptions;
-    this.components.chips.selectedIndex = Math.max(0, chipOptions.findIndex((option) => option.value === this.selectedChip));
+    this.updateSelectOptions(this.components.files, fileOptions, this.files.length > 0 ? this.files.map((file) => `${file.path}:${file.size}:${file.modifiedAt.getTime()}:${file.sha256Short}`).join("\n") : "<no-files>");
+    this.setSelectedIndex(this.components.files, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
+    const chipOptions = formatChipOptions(this.chipResults, this.chipInfoCache);
+    this.updateSelectOptions(this.components.chips, chipOptions, this.chipResults.map((chip) => `${chip}:${this.chipInfoCache.get(chip)?.raw ?? ""}`).join("\n"));
+    this.setSelectedIndex(this.components.chips, chipOptions.findIndex((option) => option.value === this.selectedChip));
+    this.renderFocusState(focus);
     const statusSummaryWidth = this.components.statusSummary.width > 0 ? this.components.statusSummary.width : undefined;
     this.components.statusSummary.content = formatStatusSummary({
       programmerStatus: this.programmerStatus,
@@ -766,9 +802,40 @@ export class MiniproTuiApp {
       chipResultCount: this.chipResults.length,
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
-    this.components.log.content = this.logLines.slice(-120).join("\n");
-    this.components.footer.content = footerText();
+    this.components.log.content = formatLogContent(this.logLines.slice(-120));
+    this.components.footer.content = `${footerText()} | focus ${focus}`;
     this.renderer?.root.requestRender();
+  }
+
+  private updateSelectOptions(select: SelectRenderable, options: SelectOption[], key: string): void {
+    const isFiles = select === this.components?.files;
+    const currentKey = isFiles ? this.fileOptionsKey : this.chipOptionsKey;
+    if (currentKey === key) return;
+
+    select.options = options;
+    if (isFiles) this.fileOptionsKey = key;
+    else this.chipOptionsKey = key;
+  }
+
+  private setSelectedIndex(select: SelectRenderable, index: number): void {
+    const next = Math.max(0, index);
+    if (select.getSelectedIndex() !== next) select.setSelectedIndex(next);
+  }
+
+  private focusLabel(): string {
+    const components = this.requireComponents();
+    if (components.files.focused) return "Files";
+    if (components.chipQuery.focused) return "Chip Search";
+    if (components.chips.focused) return "Chip Results";
+    return "Dialog";
+  }
+
+  private renderFocusState(focus: string): void {
+    const components = this.requireComponents();
+    setPanelFocus(components.filesPanel, "Files", focus === "Files");
+    setPanelFocus(components.chipPanel, "Chip Search", focus === "Chip Search" || focus === "Chip Results");
+    setPanelFocus(components.statusPanel, "Status", false);
+    setPanelFocus(components.logPanel, "Actions / Log", false);
   }
 
   private requireRenderer(): CliRenderer {
@@ -843,13 +910,28 @@ function footerText(): string {
   return "q quit | r refresh | R read | m compare | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
 }
 
-function formatChipOptions(chips: string[]): SelectOption[] {
-  const ordered = [DEFAULT_CHIP_QUERY, ...chips.filter((chip) => chip !== DEFAULT_CHIP_QUERY)];
-  return ordered.map((chip) => ({
-    name: chip === DEFAULT_CHIP_QUERY ? `${chip} (default)` : chip,
-    description: chip === DEFAULT_CHIP_QUERY ? "default" : "",
-    value: chip,
-  }));
+function orderChipResults(chips: string[], query: string): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  const preferred = query === DEFAULT_CHIP_QUERY ? [DEFAULT_CHIP_QUERY, SECONDARY_DEFAULT_CHIP] : chips.filter((chip) => chip === DEFAULT_CHIP_QUERY || chip === SECONDARY_DEFAULT_CHIP);
+
+  for (const chip of [...preferred, ...chips]) {
+    if (seen.has(chip)) continue;
+    seen.add(chip);
+    ordered.push(chip);
+  }
+
+  return ordered;
+}
+
+function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>): SelectOption[] {
+  return chips.map((chip) => formatChipLabel(chip, infoByChip.get(chip)));
+}
+
+function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): void {
+  panel.title = focused ? ` > ${title} ` : ` ${title} `;
+  panel.titleColor = focused ? "#ffffff" : ORANGE;
+  panel.borderColor = focused ? ORANGE : "#555560";
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {

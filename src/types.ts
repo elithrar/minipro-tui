@@ -26,6 +26,10 @@ export type ChipInfo = {
   availableOn?: string;
   memoryBytes?: number;
   packageName?: string;
+  vpp?: string;
+  vdd?: string;
+  vcc?: string;
+  pulseDelay?: string;
   icsp?: string;
   protocol?: string;
   readBufferSize?: number;

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import { TextAttributes } from "@opentui/core";
 
-import { formatStatusLine, formatStatusSummary } from "../src/tui/render";
+import { formatChipLabel, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "../src/tui/render";
 
 test("status line shows disconnected programmer state", () => {
   expect(
@@ -104,4 +105,28 @@ test("status summary wraps to the available panel width", () => {
   for (const line of summary.split("\n")) {
     expect(line.length).toBeLessThanOrEqual(44);
   }
+});
+
+test("chip labels include useful database metadata", () => {
+  expect(
+    formatChipLabel("M27C64A@DIP28", {
+      name: "M27C64A@DIP28",
+      memoryBytes: 8192,
+      packageName: "DIP28",
+      vcc: "5V",
+      vpp: "12V",
+      pulseDelay: "1000us",
+      raw: "Name: M27C64A@DIP28",
+    }),
+  ).toEqual({ name: "M27C64A@DIP28 (5V, 28 pin DIP, 1000us)", description: "", value: "M27C64A@DIP28" });
+  expect(formatChipLabel("AT28C64B")).toEqual({ name: "AT28C64B (default)", description: "default", value: "AT28C64B" });
+});
+
+test("log formatting strips terminal escape sequences and bolds commands", () => {
+  expect(sanitizeLogLine("\u001b[KReading Code... 12\r")).toBe("Reading Code... 12");
+
+  const content = formatLogContent(['$ ["minipro","-Q"]', "exit 0 in 25ms"]);
+  expect(content.chunks[0]?.text).toBe('$ ["minipro","-Q"]\n');
+  expect(content.chunks[0]?.attributes).toBe(TextAttributes.BOLD);
+  expect(content.chunks[1]?.attributes).toBeUndefined();
 });

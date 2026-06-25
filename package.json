@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "bun run src/main.ts",
     "test": "bun test",
-    "build": "bun build src/main.ts --compile --outfile minipro-tui"
+    "build": "bun build src/main.ts --target bun --compile --outfile minipro-tui --external '@opentui/core-*'"
   },
   "type": "module",
   "dependencies": {

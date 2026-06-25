@@ -59,6 +59,18 @@ export function parseChipInfo(raw: string): ChipInfo {
       case "package":
         info.packageName = value;
         break;
+      case "vpp programming voltage":
+        info.vpp = value;
+        break;
+      case "vdd write voltage":
+        info.vdd = value;
+        break;
+      case "vcc verify voltage":
+        info.vcc = value;
+        break;
+      case "pulse delay":
+        info.pulseDelay = value;
+        break;
       case "icsp":
         info.icsp = value;
         break;

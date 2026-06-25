@@ -43,6 +43,29 @@ test("parses chip info fields and preserves raw output", async () => {
   });
 });
 
+test("parses chip programming voltage metadata", () => {
+  const raw = [
+    "Name: M27C64A@DIP28",
+    "Memory: 8192 Bytes",
+    "Package: DIP28",
+    "VPP programming voltage: 12V",
+    "VDD write voltage: 5.5V",
+    "VCC verify voltage: 5V",
+    "Pulse delay: 1000us",
+  ].join("\n");
+
+  expect(parseChipInfo(raw)).toEqual({
+    name: "M27C64A@DIP28",
+    memoryBytes: 8192,
+    packageName: "DIP28",
+    vpp: "12V",
+    vdd: "5.5V",
+    vcc: "5V",
+    pulseDelay: "1000us",
+    raw,
+  });
+});
+
 test("keeps unknown chip info lines nonfatal", () => {
   const raw = "Name: FOO\nUnexpected: value\nMemory: 1,024 Bytes";
   expect(parseChipInfo(raw)).toEqual({ name: "FOO", memoryBytes: 1024, raw });

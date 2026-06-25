@@ -1,3 +1,5 @@
+import { StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
+
 import type { AdvancedOptions, ChipInfo, FileEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
 import { formatBytes } from "../files/scan";
 
@@ -42,6 +44,32 @@ export function formatFileOption(file: FileEntry): { name: string; description: 
   };
 }
 
+export function formatChipLabel(chip: string, info?: ChipInfo): { name: string; description: string; value: string } {
+  const metadata = formatChipMetadata(info);
+  const labelParts = [chip === "AT28C64B" ? "default" : undefined, metadata].filter((part): part is string => Boolean(part));
+  return {
+    name: labelParts.length > 0 ? `${chip} (${labelParts.join(", ")})` : chip,
+    description: chip === "AT28C64B" ? "default" : "",
+    value: chip,
+  };
+}
+
+export function formatLogContent(lines: string[]): StyledText {
+  const chunks = lines.map((line, index) => {
+    const suffix = index === lines.length - 1 ? "" : "\n";
+    return {
+      __isChunk: true as const,
+      text: `${sanitizeLogLine(line)}${suffix}`,
+      attributes: isCommandLogLine(line) ? TextAttributes.BOLD : undefined,
+    };
+  });
+  return new StyledText(chunks);
+}
+
+export function sanitizeLogLine(line: string): string {
+  return stripAnsiSequences(line).replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
 export function formatChipInfo(info?: ChipInfo): string {
   if (!info) return "Default chip query is AT28C64B. Select a chip search result to load chip info.";
 
@@ -83,6 +111,23 @@ export function formatStatusSummary(input: StatusSummaryInput, options: StatusSu
 
 function formatChipMemory(info: ChipInfo): string {
   return info.memoryBytes === undefined ? "size unknown" : formatBytes(info.memoryBytes);
+}
+
+function formatChipMetadata(info?: ChipInfo): string {
+  if (!info) return "";
+
+  const parts = [info.vcc ?? info.vdd ?? info.vpp, formatPackageName(info.packageName), info.pulseDelay].filter((part): part is string => Boolean(part));
+  return parts.join(", ");
+}
+
+function formatPackageName(packageName?: string): string | undefined {
+  const match = /^([A-Z]+)(\d+)$/i.exec(packageName ?? "");
+  if (!match) return packageName;
+  return `${match[2]} pin ${match[1]?.toUpperCase()}`;
+}
+
+function isCommandLogLine(line: string): boolean {
+  return sanitizeLogLine(line).trimStart().startsWith("$ ");
 }
 
 function formatFitValue(input: StatusSummaryInput): string {
