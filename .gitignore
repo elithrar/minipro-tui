@@ -8,6 +8,9 @@ dist
 /minipro-tui
 .*.bun-build
 
+# Local ROM/bin working files
+bins/**
+
 # code coverage
 coverage
 *.lcov
