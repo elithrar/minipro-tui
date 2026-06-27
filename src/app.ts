@@ -52,6 +52,7 @@ const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
 const CHIP_INFO_PREFETCH_LIMIT = 12;
+const RECENT_LIMIT = 8;
 
 type Components = {
   statusBarBox: BoxRenderable;
@@ -81,6 +82,10 @@ export class MiniproTuiApp {
   private chipQuery = DEFAULT_CHIP_QUERY;
   private chipResults: string[] = [];
   private chipInfoCache = new Map<string, ChipInfo>();
+  private recentFilePaths: string[] = [];
+  private recentDirectories: string[] = [];
+  private recentChips: string[] = [];
+  private recentDatabases: ProgrammerKind[] = [];
   private selectedFile: FileEntry | undefined;
   private selectedChip: string | undefined;
   private chipInfo: ChipInfo | undefined;
@@ -150,13 +155,12 @@ export class MiniproTuiApp {
     const topRow = new BoxRenderable(renderer, { id: "top-row", height: "33%", width: "100%", flexDirection: "row", marginBottom: 1 });
     const filesPanel = panel(renderer, "files-panel", "Files");
     filesPanel.marginRight = 1;
-    filesPanel.padding = 0;
     const fileQuery = new InputRenderable(renderer, {
       id: "file-query",
       value: "",
       placeholder: "Find files or folders",
       width: "100%",
-      backgroundColor: ELEMENT,
+      backgroundColor: PANEL,
       focusedBackgroundColor: ELEMENT_FOCUSED,
       textColor: TEXT,
       cursorColor: PRIMARY,
@@ -168,13 +172,12 @@ export class MiniproTuiApp {
 
     const chipPanel = panel(renderer, "chip-panel", "Chip Search");
     chipPanel.marginRight = 1;
-    chipPanel.padding = 0;
     const chipQuery = new InputRenderable(renderer, {
       id: "chip-query",
       value: DEFAULT_CHIP_QUERY,
       placeholder: "AT28C64B",
       width: "100%",
-      backgroundColor: ELEMENT,
+      backgroundColor: PANEL,
       focusedBackgroundColor: ELEMENT_FOCUSED,
       textColor: TEXT,
       cursorColor: PRIMARY,
@@ -190,7 +193,6 @@ export class MiniproTuiApp {
 
     const statusPanel = panel(renderer, "status-panel", "Status");
     statusPanel.width = "100%";
-    statusPanel.padding = 0;
     const statusSummary = new TextRenderable(renderer, {
       id: "status-summary",
       width: "100%",
@@ -403,12 +405,15 @@ export class MiniproTuiApp {
     const file = entry;
     const changed = this.selectedFile?.path !== file.path;
     this.selectedFile = file;
-    if (logSelection) this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
-    else if (changed) this.render();
+    if (logSelection) {
+      this.recentFilePaths = rememberRecent(this.recentFilePaths, file.path);
+      this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
+    } else if (changed) this.render();
   }
 
   private async openFileDirectory(path: string): Promise<void> {
     this.fileDirectory = path === ".." ? resolve(this.fileDirectory, "..") : path;
+    this.recentDirectories = rememberRecent(this.recentDirectories, this.fileDirectory);
     this.fileQuery = "";
     this.requireComponents().fileQuery.value = "";
     this.appendLog(`Browsing files in ${this.fileDirectory}.`);
@@ -419,6 +424,7 @@ export class MiniproTuiApp {
   private async selectChip(chip: string): Promise<void> {
     if (!chip || this.job.kind === "running") return;
     this.selectedChip = chip;
+    this.recentChips = rememberRecent(this.recentChips, chip);
     this.appendLog(`Loading chip info for ${chip}.`);
     const result = await runMinipro(buildChipInfoArgs(this.database, chip), { onLog: (line) => this.appendLog(line) });
     this.chipInfo = parseChipInfo(result.stdout);
@@ -442,14 +448,17 @@ export class MiniproTuiApp {
 
   private async pickProgrammerDatabase(): Promise<void> {
     if (this.job.kind === "running") return;
-    const kinds = this.programmerDatabases.length > 0 ? this.programmerDatabases.map((db) => db.kind) : ["tl866a", "tl866ii", "t48", "t56"];
+    const fallbackKinds: ProgrammerKind[] = ["tl866a", "tl866ii", "t48", "t56"];
+    const kinds = this.programmerDatabases.length > 0 ? this.programmerDatabases.map((db) => db.kind) : fallbackKinds;
+    const orderedKinds = orderByRecents(kinds, this.recentDatabases);
     const choice = await this.dialogs.select(
       "Programmer Database",
-      kinds.map((kind) => ({ name: kind, description: kind === this.database ? "current" : "", value: kind })),
-      kinds.indexOf(this.database),
+      orderedKinds.map((kind) => ({ name: formatCurrentName(kind, kind === this.database), description: formatRecentDescription(this.recentDatabases.includes(kind), kind === this.database), value: kind })),
+      orderedKinds.indexOf(this.database),
     );
     if (!choice || !isProgrammerKind(String(choice.value))) return;
     this.database = String(choice.value) as ProgrammerKind;
+    this.recentDatabases = rememberRecent(this.recentDatabases, this.database);
     this.chipInfoCache.clear();
     this.selectedChip = undefined;
     this.chipInfo = undefined;
@@ -741,14 +750,16 @@ export class MiniproTuiApp {
       job: this.job,
     })} | Focus ${focus}`;
     this.components.statusBarBox.backgroundColor = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
-    const visibleFileEntries = filterFileTreeEntries(this.fileTreeEntries, this.fileQuery, this.fileDirectory);
+    const filteredFileEntries = filterFileTreeEntries(this.fileTreeEntries, this.fileQuery, this.fileDirectory);
+    const visibleFileEntries = this.fileQuery.trim() ? filteredFileEntries : orderFileTreeEntries(filteredFileEntries, this.recentFilePaths, this.recentDirectories);
     const fileOptions = visibleFileEntries.length > 0
-      ? visibleFileEntries.map(formatFileTreeOption)
-      : [{ name: "No files", description: "Press a to show all files, or clear the file search.", value: "" }];
+      ? visibleFileEntries.map((entry) => formatFileTreeDisplayOption(entry, this.selectedFile?.path, this.recentFilePaths, this.recentDirectories))
+      : [formatFileEmptyOption(this.fileDirectory, this.fileQuery, this.showAllFiles)];
     this.updateSelectOptions(this.components.files, fileOptions, visibleFileEntries.length > 0 ? visibleFileEntries.map(formatFileTreeOptionKey).join("\n") : "<no-files>");
     this.setSelectedIndex(this.components.files, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
-    const chipOptions = formatChipOptions(this.chipResults, this.chipInfoCache);
-    this.updateSelectOptions(this.components.chips, chipOptions, this.chipResults.map((chip) => `${chip}:${this.chipInfoCache.get(chip)?.raw ?? ""}`).join("\n"));
+    const visibleChips = orderByRecents(this.chipResults, this.recentChips);
+    const chipOptions = visibleChips.length > 0 ? formatChipOptions(visibleChips, this.chipInfoCache, this.selectedChip, this.recentChips) : [formatChipEmptyOption(this.chipQuery)];
+    this.updateSelectOptions(this.components.chips, chipOptions, visibleChips.length > 0 ? visibleChips.map((chip) => `${chip}:${chip === this.selectedChip}:${this.recentChips.includes(chip)}:${this.chipInfoCache.get(chip)?.raw ?? ""}`).join("\n") : "<no-chips>");
     this.setSelectedIndex(this.components.chips, chipOptions.findIndex((option) => option.value === this.selectedChip));
     this.renderFocusState(focus);
     const statusSummaryWidth = this.components.statusSummary.width > 0 ? this.components.statusSummary.width : undefined;
@@ -863,7 +874,7 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
 }
 
 function footerText(): string {
-  return "q quit | f file search | / chips | r refresh | R read | m compare | p programmer | tab focus | enter/space select | backspace parent | c check | b blank | w write | v verify | a advanced | l log | ? help";
+  return "q quit | tab focus | enter/space select | f files | / chips | r refresh | w write | m compare | R read | ? help";
 }
 
 function truncateEnd(value: string, width: number): string {
@@ -887,8 +898,79 @@ function orderChipResults(chips: string[], query: string): string[] {
   return ordered;
 }
 
-function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>): SelectOption[] {
-  return chips.map((chip) => formatChipLabel(chip, infoByChip.get(chip)));
+function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>, selectedChip: string | undefined, recentChips: string[]): SelectOption[] {
+  return chips.map((chip) => {
+    const option = formatChipLabel(chip, infoByChip.get(chip));
+    const current = chip === selectedChip;
+    const recent = recentChips.includes(chip);
+    return {
+      ...option,
+      name: formatCurrentName(option.name, current),
+      description: formatRecentDescription(recent, current, option.description),
+    };
+  });
+}
+
+function formatFileTreeDisplayOption(entry: FileTreeEntry, selectedPath: string | undefined, recentFiles: string[], recentDirectories: string[]): SelectOption {
+  const option = formatFileTreeOption(entry);
+  const current = entry.kind !== "directory" && entry.path === selectedPath;
+  const recent = entry.kind === "directory" ? recentDirectories.includes(entry.path) : recentFiles.includes(entry.path);
+  return {
+    ...option,
+    name: formatCurrentName(option.name, current),
+    description: formatRecentDescription(recent, current, option.description),
+  };
+}
+
+function formatCurrentName(name: string, current: boolean): string {
+  return current ? `> ${name}` : `  ${name}`;
+}
+
+function formatRecentDescription(recent: boolean, current: boolean, description = ""): string {
+  const labels = [current ? "current" : undefined, recent && !current ? "recent" : undefined].filter((label): label is string => Boolean(label));
+  if (labels.length === 0) return description;
+  return description ? `${labels.join(", ")} | ${description}` : labels.join(", ");
+}
+
+function formatFileEmptyOption(directory: string, query: string, showAllFiles: boolean): SelectOption {
+  const relativeDirectory = formatDirectoryLabel(directory);
+  if (query.trim()) {
+    return { name: "No matching files", description: `No matches in ${relativeDirectory}. Clear the file search or open another directory.`, value: "" };
+  }
+  if (!showAllFiles) {
+    return { name: "No programming files", description: `No .bin/.rom/.hex/.srec/.eep files in ${relativeDirectory}. Press a to show all files.`, value: "" };
+  }
+  return { name: "Empty directory", description: `No files or folders in ${relativeDirectory}. Backspace opens the parent.`, value: "" };
+}
+
+function formatChipEmptyOption(query: string): SelectOption {
+  const label = query.trim() || DEFAULT_CHIP_QUERY;
+  return { name: "No matching chips", description: `No ${label} results. Edit the chip query and press Enter.`, value: "" };
+}
+
+function orderFileTreeEntries(entries: FileTreeEntry[], recentFiles: string[], recentDirectories: string[]): FileTreeEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.name === "..") return -1;
+    if (b.name === "..") return 1;
+    if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+    const aRecent = recentRank(a.kind === "directory" ? recentDirectories : recentFiles, a.path);
+    const bRecent = recentRank(b.kind === "directory" ? recentDirectories : recentFiles, b.path);
+    if (aRecent !== bRecent) return aRecent - bRecent;
+    return 0;
+  });
+}
+
+function orderByRecents<T>(items: T[], recents: T[]): T[] {
+  return [...items].sort((a, b) => recentRank(recents, a) - recentRank(recents, b));
+}
+
+function recentRank<T>(recents: T[], value: T): number {
+  const index = recents.indexOf(value);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+}
+
+function rememberRecent<T>(items: T[], value: T): T[] {
+  return [value, ...items.filter((item) => item !== value)].slice(0, RECENT_LIMIT);
 }
 
 function filterFileTreeEntries(entries: FileTreeEntry[], query: string, directory: string): FileTreeEntry[] {

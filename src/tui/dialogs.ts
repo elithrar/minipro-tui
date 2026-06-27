@@ -2,6 +2,7 @@ import {
   BoxRenderable,
   InputRenderable,
   InputRenderableEvents,
+  RGBA,
   SelectRenderable,
   SelectRenderableEvents,
   TextRenderable,
@@ -37,19 +38,15 @@ export class DialogController {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
     const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 8));
-    const modal = this.modalBox(renderer, title, textHeight + 8);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.text, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
-    const buttons = new SelectRenderable(renderer, {
-      ...this.selectOptions("confirm-buttons", 4),
-      options: [
-        { name: "Cancel", description: "Return without continuing", value: "cancel" },
-        { name: confirmLabel, description: "Continue with this action", value: "confirm" },
-      ],
-      selectedIndex: 0,
-    });
-    modal.add(buttons);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Choose    Esc/q = Cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 7));
+    const modal = this.modalBox(renderer, textHeight + 6);
+    this.addHeader(renderer, modal, title);
+    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.muted, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
+    const buttonRow = new TextRenderable(renderer, { content: "", width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 });
+    modal.add(buttonRow);
+    modal.add(new TextRenderable(renderer, { content: "left/right choose  enter select  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    const backdrop = this.backdropBox(renderer);
+    renderer.root.add(backdrop);
     renderer.root.add(modal);
     renderer.root.requestRender();
 
@@ -58,30 +55,56 @@ export class DialogController {
       const done = (value: boolean) => {
         if (settled) return;
         settled = true;
-        buttons.onKeyDown = undefined;
-        buttons.off(SelectRenderableEvents.ITEM_SELECTED, selected);
+        modal.onKeyDown = undefined;
         renderer.root.remove(modal.id);
+        renderer.root.remove(backdrop.id);
         this.options.onClose();
         resolve(value);
       };
-      const selected = (_index: number, option: SelectOption) => done(option.value === "confirm");
-      buttons.on(SelectRenderableEvents.ITEM_SELECTED, selected);
-      buttons.onKeyDown = (key: KeyEvent) => {
+      let active: "cancel" | "confirm" = "cancel";
+      const renderButtons = () => {
+        buttonRow.content = formatConfirmButtons(active, confirmLabel.toLowerCase(), modalInnerWidth(renderer));
+        renderer.root.requestRender();
+      };
+      modal.onKeyDown = (key: KeyEvent) => {
         if (isCancelKey(key) || isKey(key, "q") || isKey(key, "n")) {
           key.preventDefault();
           key.stopPropagation();
           done(false);
+          return;
+        }
+        if (isKey(key, "left")) {
+          key.preventDefault();
+          key.stopPropagation();
+          active = "cancel";
+          renderButtons();
+          return;
+        }
+        if (isKey(key, "right")) {
+          key.preventDefault();
+          key.stopPropagation();
+          active = "confirm";
+          renderButtons();
+          return;
+        }
+        if (key.name === "enter" || key.sequence === "\r" || key.sequence === "\n") {
+          key.preventDefault();
+          key.stopPropagation();
+          done(active === "confirm");
         }
       };
-      buttons.focus();
+      modal.focusable = true;
+      modal.focus();
+      renderButtons();
     });
   }
 
   async filename(title: string, initialValue: string): Promise<string | undefined> {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
-    const modal = this.modalBox(renderer, title, 9);
-    modal.add(new TextRenderable(renderer, { content: "Output filename:", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    const modal = this.modalBox(renderer, 8);
+    this.addHeader(renderer, modal, title);
+    modal.add(new TextRenderable(renderer, { content: "Output filename", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
     const input = new InputRenderable(renderer, {
       value: initialValue,
       width: "100%",
@@ -93,7 +116,9 @@ export class DialogController {
       marginBottom: 1,
     });
     modal.add(input);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Read    Esc = Cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    modal.add(new TextRenderable(renderer, { content: "enter read  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    const backdrop = this.backdropBox(renderer);
+    renderer.root.add(backdrop);
     renderer.root.add(modal);
     renderer.root.requestRender();
 
@@ -105,6 +130,7 @@ export class DialogController {
         input.onKeyDown = undefined;
         input.off(InputRenderableEvents.ENTER, submit);
         renderer.root.remove(modal.id);
+        renderer.root.remove(backdrop.id);
         this.options.onClose();
         resolve(value);
       };
@@ -129,15 +155,18 @@ export class DialogController {
     this.options.onOpen();
     const rowsPerOption = options.some((option) => option.description) ? 2 : 1;
     const desiredSelectHeight = Math.max(4, options.length * rowsPerOption);
-    const modalHeight = clamp(desiredSelectHeight + 7, 10, maxModalHeight(renderer));
-    const modal = this.modalBox(renderer, title, modalHeight);
+    const modalHeight = clamp(desiredSelectHeight + 5, 8, maxModalHeight(renderer));
+    const modal = this.modalBox(renderer, modalHeight);
+    this.addHeader(renderer, modal, title);
     const select = new SelectRenderable(renderer, {
-      ...this.selectOptions("modal-select", Math.max(4, modalHeight - 7)),
+      ...this.selectOptions("modal-select", Math.max(4, modalHeight - 5)),
       options,
       selectedIndex: Math.max(0, selectedIndex),
     });
     modal.add(select);
-    modal.add(new TextRenderable(renderer, { content: "Enter = Select    Esc/q = Cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    modal.add(new TextRenderable(renderer, { content: "enter select  arrows move  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    const backdrop = this.backdropBox(renderer);
+    renderer.root.add(backdrop);
     renderer.root.add(modal);
     renderer.root.requestRender();
 
@@ -149,6 +178,7 @@ export class DialogController {
         select.onKeyDown = undefined;
         select.off(SelectRenderableEvents.ITEM_SELECTED, selected);
         renderer.root.remove(modal.id);
+        renderer.root.remove(backdrop.id);
         this.options.onClose();
         resolve(value);
       };
@@ -170,9 +200,12 @@ export class DialogController {
     this.options.onOpen();
     const maxHeight = maxModalHeight(renderer);
     const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 5));
-    const modal = this.modalBox(renderer, title, textHeight + 5);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.text, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
-    modal.add(new TextRenderable(renderer, { content: "Enter/Esc/q = Close", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    const modal = this.modalBox(renderer, textHeight + 4);
+    this.addHeader(renderer, modal, title);
+    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.muted, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
+    modal.add(new TextRenderable(renderer, { content: "enter/esc close", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    const backdrop = this.backdropBox(renderer);
+    renderer.root.add(backdrop);
     renderer.root.add(modal);
     renderer.root.requestRender();
 
@@ -183,6 +216,7 @@ export class DialogController {
         settled = true;
         modal.onKeyDown = undefined;
         renderer.root.remove(modal.id);
+        renderer.root.remove(backdrop.id);
         this.options.onClose();
         resolve();
       };
@@ -198,26 +232,44 @@ export class DialogController {
     });
   }
 
-  private modalBox(renderer: CliRenderer, title: string, height: number): BoxRenderable {
+  private modalBox(renderer: CliRenderer, height: number): BoxRenderable {
     const modalHeight = clamp(height, 6, maxModalHeight(renderer));
+    const width = modalWidth(renderer);
     return new BoxRenderable(renderer, {
       id: `modal-${++this.nextModalId}`,
-      title: ` ${title} `,
-      titleColor: this.options.theme.primary,
       position: "absolute",
       zIndex: 100,
-      top: Math.max(1, Math.floor((renderer.height - modalHeight) / 2)),
-      left: "5%",
-      width: "90%",
+      top: Math.max(1, Math.floor(renderer.height / 4)),
+      left: Math.max(1, Math.floor((renderer.width - width) / 2)),
+      width,
       height: modalHeight,
-      border: true,
-      borderStyle: "single",
-      borderColor: this.options.theme.borderActive,
-      focusedBorderColor: this.options.theme.primary,
+      border: false,
       backgroundColor: this.options.theme.panel,
       padding: 1,
       flexDirection: "column",
     });
+  }
+
+  private backdropBox(renderer: CliRenderer): BoxRenderable {
+    return new BoxRenderable(renderer, {
+      id: `modal-backdrop-${this.nextModalId}`,
+      position: "absolute",
+      zIndex: 99,
+      top: 0,
+      left: 0,
+      width: renderer.width,
+      height: renderer.height,
+      backgroundColor: RGBA.fromInts(0, 0, 0, 150),
+    });
+  }
+
+  private addHeader(renderer: CliRenderer, modal: BoxRenderable, title: string): void {
+    const width = Math.max(10, modal.width - 2);
+    const esc = "esc";
+    const titleWidth = Math.max(1, width - esc.length - 1);
+    const label = truncateEnd(title, titleWidth);
+    const content = `${label}${" ".repeat(Math.max(1, width - label.length - esc.length))}${esc}`;
+    modal.add(new TextRenderable(renderer, { content, width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 }));
   }
 
   private selectOptions(id: string, height: number): ConstructorParameters<typeof SelectRenderable>[1] {
@@ -236,16 +288,28 @@ export class DialogController {
       selectedDescriptionColor: this.options.theme.selectedText,
       showScrollIndicator: true,
       wrapSelection: true,
+      itemSpacing: 0,
     };
   }
 }
 
 function maxModalHeight(renderer: CliRenderer): number {
-  return Math.max(6, renderer.height - 4);
+  return Math.max(6, Math.floor(renderer.height * 0.6));
 }
 
 function modalInnerWidth(renderer: CliRenderer): number {
-  return Math.max(20, Math.floor(renderer.width * 0.9) - 4);
+  return Math.max(20, modalWidth(renderer) - 2);
+}
+
+function modalWidth(renderer: CliRenderer): number {
+  return clamp(60, 30, Math.max(30, renderer.width - 2));
+}
+
+function formatConfirmButtons(active: "cancel" | "confirm", confirmLabel: string, width: number): string {
+  const cancel = active === "cancel" ? "[cancel]" : " cancel ";
+  const confirm = active === "confirm" ? `[${confirmLabel}]` : ` ${confirmLabel} `;
+  const content = `${cancel} ${confirm}`;
+  return `${" ".repeat(Math.max(0, width - content.length))}${content}`;
 }
 
 function estimateWrappedRows(content: string, width: number): number {
@@ -254,6 +318,13 @@ function estimateWrappedRows(content: string, width: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+function truncateEnd(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (value.length <= width) return value;
+  if (width <= 3) return ".".repeat(width);
+  return `${value.slice(0, width - 3)}...`;
 }
 
 function isCancelKey(key: KeyEvent): boolean {
