@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 
 import { clearHashCache, sha256File, shortSha } from "../src/files/hash";
-import { scanFiles } from "../src/files/scan";
+import { scanFiles, scanFileTree } from "../src/files/scan";
 
 test("file scanner excludes directories and shows programming files by default", async () => {
   const dir = join(import.meta.dir, ".tmp-files");
@@ -13,6 +13,19 @@ test("file scanner excludes directories and shows programming files by default",
   await writeFile(join(dir, "notes.txt"), "hello");
   const files = await scanFiles(dir);
   expect(files.map((file) => file.name)).toEqual(["image.bin"]);
+});
+
+test("file tree scanner includes directories and filters files by default", async () => {
+  const dir = join(import.meta.dir, ".tmp-file-tree");
+  await mkdir(join(dir, "nested"), { recursive: true });
+  await writeFile(join(dir, "image.bin"), new Uint8Array([1, 2, 3]));
+  await writeFile(join(dir, "notes.txt"), "hello");
+
+  const entries = await scanFileTree(dir);
+
+  expect(entries.map((entry) => entry.name)).toContain("nested");
+  expect(entries.map((entry) => entry.name)).toContain("image.bin");
+  expect(entries.map((entry) => entry.name)).not.toContain("notes.txt");
 });
 
 test("file scanner can include all files", async () => {

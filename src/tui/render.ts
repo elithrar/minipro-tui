@@ -1,6 +1,6 @@
 import { RGBA, StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
 
-import type { AdvancedOptions, ChipInfo, FileEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
+import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
 import { formatBytes } from "../files/scan";
 
 export type StatusSummaryInput = {
@@ -51,6 +51,18 @@ export function formatFileOption(file: FileEntry): { name: string; description: 
     description: `${file.size} B (${formatBytes(file.size)})  ${file.modifiedAt.toISOString().slice(0, 19)}  ${file.sha256Short}`,
     value: file.path,
   };
+}
+
+export function formatFileTreeOption(entry: FileTreeEntry): { name: string; description: string; value: string } {
+  if (entry.kind === "directory") {
+    return {
+      name: entry.name === ".." ? "../" : `${entry.name}/`,
+      description: "directory",
+      value: entry.path,
+    };
+  }
+
+  return formatFileOption(entry);
 }
 
 export function formatChipLabel(chip: string, info?: ChipInfo): { name: string; description: string; value: string } {

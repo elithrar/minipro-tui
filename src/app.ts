@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, relative, resolve } from "node:path";
 
 import {
   BoxRenderable,
@@ -16,9 +16,9 @@ import {
   type SelectOption,
 } from "@opentui/core";
 
-import type { AdvancedOptions, ChipInfo, FileEntry, JobState, ProgrammerDatabase, ProgrammerKind, ProgrammerStatus } from "./types";
+import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerDatabase, ProgrammerKind, ProgrammerStatus } from "./types";
 import { sha256Bytes } from "./files/hash";
-import { scanFiles } from "./files/scan";
+import { isFileEntry, scanFileTree } from "./files/scan";
 import {
   buildBlankCheckArgs,
   buildDefaultWritePreview,
@@ -33,9 +33,9 @@ import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgramm
 import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
 import { DialogController } from "./tui/dialogs";
-import { formatChipLabel, formatFileOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
+import { formatChipLabel, formatFileTreeOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
 
-const PRIMARY = "#fab283";
+const PRIMARY = "#ff8a00";
 const BG = "#0a0a0a";
 const PANEL = "#141414";
 const ELEMENT = "#1e1e1e";
@@ -56,6 +56,7 @@ const CHIP_INFO_PREFETCH_LIMIT = 12;
 type Components = {
   statusBarBox: BoxRenderable;
   filesPanel: BoxRenderable;
+  fileQuery: InputRenderable;
   files: SelectRenderable;
   chipPanel: BoxRenderable;
   chipQuery: InputRenderable;
@@ -73,7 +74,10 @@ export class MiniproTuiApp {
   private programmerStatus: ProgrammerStatus = { connected: false, raw: "" };
   private programmerDatabases: ProgrammerDatabase[] = [];
   private database: ProgrammerKind = DEFAULT_DATABASE;
+  private fileTreeEntries: FileTreeEntry[] = [];
   private files: FileEntry[] = [];
+  private fileDirectory = process.cwd();
+  private fileQuery = "";
   private chipQuery = DEFAULT_CHIP_QUERY;
   private chipResults: string[] = [];
   private chipInfoCache = new Map<string, ChipInfo>();
@@ -147,7 +151,19 @@ export class MiniproTuiApp {
     const filesPanel = panel(renderer, "files-panel", "Files");
     filesPanel.marginRight = 1;
     filesPanel.padding = 0;
+    const fileQuery = new InputRenderable(renderer, {
+      id: "file-query",
+      value: "",
+      placeholder: "Find files or folders",
+      width: "100%",
+      backgroundColor: ELEMENT,
+      focusedBackgroundColor: ELEMENT_FOCUSED,
+      textColor: TEXT,
+      cursorColor: PRIMARY,
+      marginBottom: 1,
+    });
     const files = new SelectRenderable(renderer, selectOptions("files", "100%"));
+    filesPanel.add(fileQuery);
     filesPanel.add(files);
 
     const chipPanel = panel(renderer, "chip-panel", "Chip Search");
@@ -205,7 +221,7 @@ export class MiniproTuiApp {
     renderer.root.add(root);
     files.focus();
 
-    return { statusBarBox, filesPanel, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footerBox };
+    return { statusBarBox, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footerBox };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -217,7 +233,7 @@ export class MiniproTuiApp {
         return;
       }
 
-      if (components.chipQuery.focused) {
+      if (components.fileQuery.focused || components.chipQuery.focused) {
         if (key.name === "tab") this.focusNext();
         return;
       }
@@ -238,8 +254,19 @@ export class MiniproTuiApp {
       }
 
       if (key.name === "f") {
-        components.files.focus();
+        components.fileQuery.focus();
         this.render();
+        return;
+      }
+
+      if (components.files.focused && key.name === "backspace") {
+        void this.openFileDirectory("..");
+        return;
+      }
+
+      if (components.files.focused && (key.name === "space" || key.sequence === " ")) {
+        const option = components.files.getSelectedOption();
+        if (option) void this.selectFileTreeEntry(String(option.value ?? ""), true);
         return;
       }
 
@@ -286,19 +313,30 @@ export class MiniproTuiApp {
       void this.searchChip(value.trim() || DEFAULT_CHIP_QUERY, false, true);
     });
 
+    components.fileQuery.on(InputRenderableEvents.INPUT, (value: string) => {
+      this.fileQuery = value;
+      this.render();
+    });
+
+    components.fileQuery.on(InputRenderableEvents.ENTER, (value: string) => {
+      this.fileQuery = value;
+      components.files.focus();
+      this.render();
+    });
+
     components.files.on(SelectRenderableEvents.SELECTION_CHANGED, (_index: number, option: SelectOption | null) => {
-      this.selectFileByPath(String(option?.value ?? ""));
+      this.selectFileTreeEntry(String(option?.value ?? ""));
     });
 
     components.files.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
-      this.selectFileByPath(String(option.value ?? ""), true);
+      void this.selectFileTreeEntry(String(option.value ?? ""), true);
     });
 
     components.chips.on(SelectRenderableEvents.ITEM_SELECTED, (_index: number, option: SelectOption) => {
       void this.selectChip(String(option.value ?? option.name));
     });
 
-    for (const focusable of [components.files, components.chipQuery, components.chips]) {
+    for (const focusable of [components.fileQuery, components.files, components.chipQuery, components.chips]) {
       focusable.on(RenderableEvents.FOCUSED, () => this.render());
       focusable.on(RenderableEvents.BLURRED, () => this.render());
     }
@@ -308,10 +346,7 @@ export class MiniproTuiApp {
     if (this.job.kind === "running") return;
     this.appendLog("Refreshing files and programmer status.");
 
-    this.files = await scanFiles(process.cwd(), this.showAllFiles);
-    const selectedPath = this.selectedFile?.path;
-    this.selectedFile = selectedPath ? this.files.find((entry) => entry.path === selectedPath) : undefined;
-    if (!this.selectedFile && this.files.length > 0) this.selectedFile = this.files[0];
+    await this.refreshFiles();
 
     const databases = await runMinipro(["-Q"], { onLog: (line) => this.appendLog(line) });
     this.programmerDatabases = parseProgrammerDatabases(databases.stdout);
@@ -327,6 +362,14 @@ export class MiniproTuiApp {
     }
     this.job = { kind: "idle" };
     this.render();
+  }
+
+  private async refreshFiles(): Promise<void> {
+    this.fileTreeEntries = await scanFileTree(this.fileDirectory, this.showAllFiles);
+    this.files = this.fileTreeEntries.filter(isFileEntry);
+    const selectedPath = this.selectedFile?.path;
+    this.selectedFile = selectedPath ? this.files.find((entry) => entry.path === selectedPath) : undefined;
+    if (!this.selectedFile && this.files.length > 0) this.selectedFile = this.files[0];
   }
 
   private async searchChip(query: string, preferDefault: boolean, focusResults = false): Promise<void> {
@@ -349,13 +392,28 @@ export class MiniproTuiApp {
     if (defaultChip) await this.selectChip(defaultChip);
   }
 
-  private selectFileByPath(path: string, logSelection = false): void {
-    const file = this.files.find((entry) => entry.path === path);
-    if (!file) return;
+  private async selectFileTreeEntry(path: string, logSelection = false): Promise<void> {
+    const entry = this.fileTreeEntries.find((item) => item.path === path);
+    if (!entry) return;
+    if (entry.kind === "directory") {
+      if (logSelection) await this.openFileDirectory(entry.path);
+      return;
+    }
+
+    const file = entry;
     const changed = this.selectedFile?.path !== file.path;
     this.selectedFile = file;
     if (logSelection) this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
     else if (changed) this.render();
+  }
+
+  private async openFileDirectory(path: string): Promise<void> {
+    this.fileDirectory = path === ".." ? resolve(this.fileDirectory, "..") : path;
+    this.fileQuery = "";
+    this.requireComponents().fileQuery.value = "";
+    this.appendLog(`Browsing files in ${this.fileDirectory}.`);
+    await this.refreshFiles();
+    this.render();
   }
 
   private async selectChip(chip: string): Promise<void> {
@@ -653,7 +711,7 @@ export class MiniproTuiApp {
 
   private focusNext(): void {
     const components = this.requireComponents();
-    const focusables = [components.files, components.chipQuery, components.chips];
+    const focusables = [components.fileQuery, components.files, components.chipQuery, components.chips];
     const current = focusables.findIndex((item) => item.focused);
     focusables[(current + 1) % focusables.length]?.focus();
     this.render();
@@ -683,8 +741,11 @@ export class MiniproTuiApp {
       job: this.job,
     })} | Focus ${focus}`;
     this.components.statusBarBox.backgroundColor = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
-    const fileOptions = this.files.length > 0 ? this.files.map(formatFileOption) : [{ name: "No files", description: "Press a to show all files, or add .bin/.rom/.hex/.srec/.eep files.", value: "" }];
-    this.updateSelectOptions(this.components.files, fileOptions, this.files.length > 0 ? this.files.map((file) => `${file.path}:${file.size}:${file.modifiedAt.getTime()}:${file.sha256Short}`).join("\n") : "<no-files>");
+    const visibleFileEntries = filterFileTreeEntries(this.fileTreeEntries, this.fileQuery, this.fileDirectory);
+    const fileOptions = visibleFileEntries.length > 0
+      ? visibleFileEntries.map(formatFileTreeOption)
+      : [{ name: "No files", description: "Press a to show all files, or clear the file search.", value: "" }];
+    this.updateSelectOptions(this.components.files, fileOptions, visibleFileEntries.length > 0 ? visibleFileEntries.map(formatFileTreeOptionKey).join("\n") : "<no-files>");
     this.setSelectedIndex(this.components.files, fileOptions.findIndex((option) => option.value === this.selectedFile?.path));
     const chipOptions = formatChipOptions(this.chipResults, this.chipInfoCache);
     this.updateSelectOptions(this.components.chips, chipOptions, this.chipResults.map((chip) => `${chip}:${this.chipInfoCache.get(chip)?.raw ?? ""}`).join("\n"));
@@ -726,6 +787,7 @@ export class MiniproTuiApp {
 
   private focusLabel(): string {
     const components = this.requireComponents();
+    if (components.fileQuery.focused) return "File Search";
     if (components.files.focused) return "Files";
     if (components.chipQuery.focused) return "Chip Search";
     if (components.chips.focused) return "Chip Results";
@@ -734,7 +796,7 @@ export class MiniproTuiApp {
 
   private renderFocusState(focus: string): void {
     const components = this.requireComponents();
-    setPanelFocus(components.filesPanel, "Files", focus === "Files");
+    setPanelFocus(components.filesPanel, `Files ${formatDirectoryLabel(this.fileDirectory)}`, focus === "File Search" || focus === "Files");
     setPanelFocus(components.chipPanel, "Chip Search", focus === "Chip Search" || focus === "Chip Results");
     setPanelFocus(components.statusPanel, "Status", false);
     setPanelFocus(components.logPanel, "Actions / Log", false);
@@ -801,7 +863,7 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
 }
 
 function footerText(): string {
-  return "q quit | f files | / chips | r refresh | R read | m compare | p programmer | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help";
+  return "q quit | f file search | / chips | r refresh | R read | m compare | p programmer | tab focus | enter/space select | backspace parent | c check | b blank | w write | v verify | a advanced | l log | ? help";
 }
 
 function truncateEnd(value: string, width: number): string {
@@ -827,6 +889,59 @@ function orderChipResults(chips: string[], query: string): string[] {
 
 function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>): SelectOption[] {
   return chips.map((chip) => formatChipLabel(chip, infoByChip.get(chip)));
+}
+
+function filterFileTreeEntries(entries: FileTreeEntry[], query: string, directory: string): FileTreeEntry[] {
+  const trimmed = query.trim();
+  if (!trimmed) return entries;
+
+  return entries
+    .map((entry, index) => ({ entry, index, score: fileTreeMatchScore(entry, trimmed, directory) }))
+    .filter((item) => item.entry.kind === "directory" && item.entry.name === ".." || item.score > 0)
+    .sort((a, b) => {
+      if (a.entry.name === "..") return -1;
+      if (b.entry.name === "..") return 1;
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.entry.kind !== b.entry.kind) return a.entry.kind === "directory" ? -1 : 1;
+      return a.index - b.index;
+    })
+    .map((item) => item.entry);
+}
+
+function fileTreeMatchScore(entry: FileTreeEntry, query: string, directory: string): number {
+  const haystacks = [entry.name, relative(directory, entry.path)].filter(Boolean);
+  return Math.max(...haystacks.map((value) => fuzzyScore(value, query)));
+}
+
+function fuzzyScore(value: string, query: string): number {
+  const target = value.toLowerCase();
+  const needle = query.toLowerCase();
+  let score = 0;
+  let position = 0;
+  let lastMatch = -1;
+
+  for (const char of needle) {
+    const found = target.indexOf(char, position);
+    if (found === -1) return 0;
+    score += 10;
+    if (found === lastMatch + 1) score += 5;
+    if (found === 0 || /[\s._/-]/.test(target[found - 1] ?? "")) score += 3;
+    lastMatch = found;
+    position = found + 1;
+  }
+
+  if (target.startsWith(needle)) score += 20;
+  return score - Math.min(target.length, 80) / 100;
+}
+
+function formatFileTreeOptionKey(entry: FileTreeEntry): string {
+  if (entry.kind === "directory") return `dir:${entry.path}:${entry.modifiedAt.getTime()}`;
+  return `file:${entry.path}:${entry.size}:${entry.modifiedAt.getTime()}:${entry.sha256Short}`;
+}
+
+function formatDirectoryLabel(directory: string): string {
+  const relativePath = relative(process.cwd(), directory);
+  return relativePath ? truncateEnd(relativePath, 24) : ".";
 }
 
 function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): void {

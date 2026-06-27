@@ -14,12 +14,22 @@ export type ProgrammerDatabase = {
 };
 
 export type FileEntry = {
+  kind?: "file";
   name: string;
   path: string;
   size: number;
   modifiedAt: Date;
   sha256Short: string;
 };
+
+export type DirectoryEntry = {
+  kind: "directory";
+  name: string;
+  path: string;
+  modifiedAt: Date;
+};
+
+export type FileTreeEntry = FileEntry | DirectoryEntry;
 
 export type ChipInfo = {
   name: string;
