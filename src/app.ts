@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { basename, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 
 import {
   BoxRenderable,
@@ -33,7 +33,7 @@ import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgramm
 import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
 import { DialogController } from "./tui/dialogs";
-import { formatChipLabel, formatFileTreeOption, formatLogContent, formatStatusLine, formatStatusSummary, sanitizeLogLine } from "./tui/render";
+import { formatChipLabel, formatFileTreeOption, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
 
 const PRIMARY = "#ff8a00";
 const BG = "#0a0a0a";
@@ -217,9 +217,9 @@ export class MiniproTuiApp {
     topRow.add(statusPanel);
     main.add(topRow);
     main.add(logPanel);
+    main.add(footerBox);
     root.add(statusBarBox);
     root.add(main);
-    root.add(footerBox);
     renderer.root.add(root);
     files.focus();
 
@@ -562,7 +562,7 @@ export class MiniproTuiApp {
       return;
     }
 
-    const outputFile = await this.dialogs.filename("Read Chip", defaultReadFilename(this.selectedChip));
+    const outputFile = await this.dialogs.filename("Read Chip", join(this.fileDirectory, defaultReadFilename(this.selectedChip)));
     if (!outputFile) {
       this.appendLog("Read cancelled.");
       return;
@@ -763,7 +763,7 @@ export class MiniproTuiApp {
     this.setSelectedIndex(this.components.chips, chipOptions.findIndex((option) => option.value === this.selectedChip));
     this.renderFocusState(focus);
     const statusSummaryWidth = this.components.statusSummary.width > 0 ? this.components.statusSummary.width : undefined;
-    this.components.statusSummary.content = formatStatusSummary({
+    this.components.statusSummary.content = formatStatusSummaryContent({
       programmerStatus: this.programmerStatus,
       database: this.database,
       selectedChip: this.selectedChip,

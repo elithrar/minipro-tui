@@ -20,9 +20,10 @@ export type StatusSummaryOptions = {
   width?: number;
 };
 
-const STATUS_LABEL_WIDTH = 7;
+const STATUS_LABEL_WIDTH = 8;
 const COMMAND_LOG_BG = RGBA.fromHex("#282828");
 const COMMAND_LOG_FG = RGBA.fromHex("#fab283");
+const DANGEROUS_OFF_BG = RGBA.fromHex("#5a1f1f");
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
@@ -112,25 +113,14 @@ export function formatChipInfo(info?: ChipInfo): string {
 }
 
 export function formatStatusSummary(input: StatusSummaryInput, options: StatusSummaryOptions = {}): string {
-  const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
-  const chip = input.chipInfo
-    ? `${input.chipInfo.name || input.selectedChip || "unknown"} | ${formatChipMemory(input.chipInfo)} | ${input.chipInfo.packageName ?? "package unknown"}`
-    : input.selectedChip
-      ? `${input.selectedChip} | load chip info before writing`
-      : "none selected";
-  const image = input.selectedFile ? `${input.selectedFile.name} | ${formatBytes(input.selectedFile.size)} | sha ${input.selectedFile.sha256Short}` : "none selected";
-  const dangerous = formatDangerousOptions(input.advanced);
   const width = options.width === undefined ? undefined : Math.max(24, Math.floor(options.width));
+  return statusRows(input).map((row) => formatStatusRow(row.label, row.value, width)).join("\n");
+}
 
-  return [
-    formatStatusRow("Fit", formatFitValue(input), width),
-    formatStatusRow("Safety", dangerous.length > 0 ? `Review: ${dangerous.join(", ")}` : "Safe default: erase, blank, write, verify, compare", width),
-    formatStatusRow("Next", formatNextAction(input), width),
-    formatStatusRow("Device", `${programmer} | DB ${input.database}`, width),
-    formatStatusRow("Files", `${input.fileCount}${input.showAllFiles ? " shown" : " found"} | Chips ${input.chipResultCount}`, width),
-    formatStatusRow("Chip", chip, width),
-    formatStatusRow("Image", image, width),
-  ].join("\n");
+export function formatStatusSummaryContent(input: StatusSummaryInput, options: StatusSummaryOptions = {}): StyledText {
+  const width = options.width === undefined ? undefined : Math.max(24, Math.floor(options.width));
+  const chunks = statusRows(input).flatMap((row, index, rows) => formatStatusRowChunks(row, width, index < rows.length - 1));
+  return new StyledText(chunks);
 }
 
 function formatChipMemory(info: ChipInfo): string {
@@ -155,55 +145,89 @@ function isCommandLogLine(line: string): boolean {
 }
 
 function formatFitValue(input: StatusSummaryInput): string {
-  if (!input.selectedFile || !input.selectedChip) return "Select a file and chip before writing";
-  if (!input.chipInfo) return "Load chip info to check image size";
-  if (input.chipInfo.memoryBytes === undefined) return "Chip memory size unknown";
-  if (input.selectedFile.size === input.chipInfo.memoryBytes) return `OK: image matches chip memory (${formatBytes(input.selectedFile.size)})`;
+  if (!input.selectedFile || !input.selectedChip) return "WAIT select file+chip";
+  if (!input.chipInfo) return "WAIT load chip info";
+  if (input.chipInfo.memoryBytes === undefined) return "WARN chip size unknown";
+  if (input.selectedFile.size === input.chipInfo.memoryBytes) return `OK ${formatBytes(input.selectedFile.size)}`;
 
   const mode = input.advanced.allowSizeMismatch ? "Override" : "Blocked";
-  return `${mode}: image ${formatBytes(input.selectedFile.size)} vs chip ${formatBytes(input.chipInfo.memoryBytes)}`;
+  return `${mode.toUpperCase()} ${formatBytes(input.selectedFile.size)} vs ${formatBytes(input.chipInfo.memoryBytes)}`;
 }
 
 function formatStatusRow(label: string, value: string, width?: number): string {
   const prefix = `${label.padEnd(STATUS_LABEL_WIDTH)} `;
-  if (width === undefined) return `${prefix}${value}`;
-
-  const contentWidth = Math.max(12, width - prefix.length);
-  return wrapWords(value, contentWidth)
-    .map((line, index) => `${index === 0 ? prefix : " ".repeat(prefix.length)}${line}`)
-    .join("\n");
+  return truncateEnd(`${prefix}${value}`, width ?? Number.MAX_SAFE_INTEGER);
 }
 
-function wrapWords(value: string, width: number): string[] {
-  const words = value.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
+function formatStatusRowChunks(row: StatusRow, width: number | undefined, newline: boolean): StyledText["chunks"] {
+  const prefix = `${row.label.padEnd(STATUS_LABEL_WIDTH)} `;
+  const available = width === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, width - prefix.length);
+  const value = truncateEnd(row.value, available);
+  const suffix = newline ? "\n" : "";
+  const chunks: StyledText["chunks"] = [{ __isChunk: true, text: prefix }];
 
-  for (let word of words) {
-    if (word.length > width) {
-      if (line) {
-        lines.push(line);
-        line = "";
-      }
-
-      while (word.length > width) {
-        lines.push(word.slice(0, width));
-        word = word.slice(width);
-      }
-    }
-
-    if (!line) {
-      line = word;
-    } else if (line.length + 1 + word.length <= width) {
-      line = `${line} ${word}`;
-    } else {
-      lines.push(line);
-      line = word;
-    }
+  if (row.stage === "on") {
+    chunks.push({ __isChunk: true, text: value, attributes: TextAttributes.BOLD });
+  } else if (row.stage === "danger-off") {
+    chunks.push({ __isChunk: true, text: value, fg: RGBA.fromHex("#ffffff"), bg: DANGEROUS_OFF_BG, attributes: TextAttributes.BOLD });
+  } else {
+    chunks.push({ __isChunk: true, text: value });
   }
 
-  if (line) lines.push(line);
-  return lines.length > 0 ? lines : [""];
+  if (suffix) chunks.push({ __isChunk: true, text: suffix });
+  return chunks;
+}
+
+type StatusRow = {
+  label: string;
+  value: string;
+  stage?: "on" | "danger-off";
+};
+
+function statusRows(input: StatusSummaryInput): StatusRow[] {
+  const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
+  return [
+    { label: "Fit", value: formatFitValue(input) },
+    stageRow("Erase", !input.advanced.skipErase, true),
+    stageRow("Blank", true, false),
+    stageRow("Write", true, false),
+    stageRow("Verify", !input.advanced.skipVerify, true),
+    stageRow("Compare", !input.advanced.disableReadbackCompare, true),
+    { label: "Device", value: `${programmer} / ${input.database}` },
+    { label: "Chip", value: formatChipStatus(input) },
+    { label: "Image", value: formatImageStatus(input) },
+    { label: "Safety", value: formatSafetyStatus(input) },
+  ];
+}
+
+function stageRow(label: string, enabled: boolean, dangerousWhenOff: boolean): StatusRow {
+  return { label, value: stageState(enabled), stage: enabled ? "on" : dangerousWhenOff ? "danger-off" : undefined };
+}
+
+function stageState(enabled: boolean): string {
+  return enabled ? "ON" : "OFF";
+}
+
+function formatChipStatus(input: StatusSummaryInput): string {
+  if (!input.selectedChip) return "none";
+  if (!input.chipInfo) return `${input.selectedChip} / info needed`;
+  return [input.chipInfo.name || input.selectedChip, formatChipMemory(input.chipInfo), input.chipInfo.packageName].filter((part): part is string => Boolean(part)).join(" / ");
+}
+
+function formatImageStatus(input: StatusSummaryInput): string {
+  if (!input.selectedFile) return "none";
+  return `${input.selectedFile.name} / ${formatBytes(input.selectedFile.size)} / ${input.selectedFile.sha256Short}`;
+}
+
+function formatSafetyStatus(input: StatusSummaryInput): string {
+  const dangerous = formatDangerousOptions(input.advanced);
+  return dangerous.length > 0 ? `REVIEW ${dangerous.length} override${dangerous.length === 1 ? "" : "s"}` : "OK defaults";
+}
+
+function truncateEnd(value: string, width: number): string {
+  if (value.length <= width) return value;
+  if (width <= 3) return ".".repeat(Math.max(0, width));
+  return `${value.slice(0, width - 3)}...`;
 }
 
 function formatDangerousOptions(options: AdvancedOptions): string[] {
@@ -215,16 +239,4 @@ function formatDangerousOptions(options: AdvancedOptions): string[] {
     options.ignoreIdMismatch ? "ID mismatch ignored" : undefined,
     options.skipIdRead ? "ID read skipped" : undefined,
   ].filter((item): item is string => item !== undefined);
-}
-
-function formatNextAction(input: StatusSummaryInput): string {
-  if (input.job.kind === "running") return `Wait for ${input.job.step}`;
-  if (!input.selectedChip) return "Search and select the target chip";
-  if (!input.selectedFile) return "Select an image file, or press R to read the chip";
-  if (!input.chipInfo) return "Select a chip result to load chip info";
-  if (input.chipInfo.memoryBytes !== undefined && input.selectedFile.size !== input.chipInfo.memoryBytes && !input.advanced.allowSizeMismatch) {
-    return "Use a matching image or explicitly allow size mismatch";
-  }
-  if (formatDangerousOptions(input.advanced).length > 0) return "Review advanced options, then press w to preview write";
-  return "w write preview | m compare | v verify | c pin check | R read";
 }
