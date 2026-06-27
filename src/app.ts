@@ -94,6 +94,9 @@ export class MiniproTuiApp {
   private showAllFiles = false;
   private advanced: AdvancedOptions = { ...DEFAULT_ADVANCED_OPTIONS };
   private modalActive = false;
+  private restoreFocusAfterModal: (() => void) | undefined;
+  private chipSearchRequestId = 0;
+  private chipInfoRequestId = 0;
   private fileOptionsKey = "";
   private chipOptionsKey = "";
   private statusLine = "";
@@ -111,10 +114,13 @@ export class MiniproTuiApp {
       muted: MUTED,
     },
     onOpen: () => {
+      this.restoreFocusAfterModal = this.captureFocusedControl();
       this.modalActive = true;
     },
     onClose: () => {
       this.modalActive = false;
+      this.restoreFocusAfterModal?.();
+      this.restoreFocusAfterModal = undefined;
       this.render();
     },
   });
@@ -376,14 +382,18 @@ export class MiniproTuiApp {
 
   private async searchChip(query: string, preferDefault: boolean, focusResults = false): Promise<void> {
     if (this.job.kind === "running") return;
+    const requestId = ++this.chipSearchRequestId;
+    const database = this.database;
     this.chipQuery = query;
     const components = this.requireComponents();
     components.chipQuery.value = query;
-    this.appendLog(`Searching ${this.database} database for ${query}.`);
-    const result = await runMinipro(buildSearchChipsArgs(this.database, query), { onLog: (line) => this.appendLog(line) });
+    this.appendLog(`Searching ${database} database for ${query}.`);
+    const result = await runMinipro(buildSearchChipsArgs(database, query), { onLog: (line) => this.appendLog(line) });
+    if (requestId !== this.chipSearchRequestId || this.database !== database || this.chipQuery !== query) return;
     this.chipResults = orderChipResults(result.exitCode === 0 ? parseChipSearch(result.stdout) : [], query);
 
-    await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT));
+    await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT), database);
+    if (requestId !== this.chipSearchRequestId || this.database !== database || this.chipQuery !== query) return;
 
     const defaultChip = preferDefault ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY) : undefined;
     this.selectedChip = defaultChip;
@@ -423,22 +433,27 @@ export class MiniproTuiApp {
 
   private async selectChip(chip: string): Promise<void> {
     if (!chip || this.job.kind === "running") return;
+    const requestId = ++this.chipInfoRequestId;
+    const database = this.database;
     this.selectedChip = chip;
+    this.chipInfo = undefined;
     this.recentChips = rememberRecent(this.recentChips, chip);
     this.appendLog(`Loading chip info for ${chip}.`);
-    const result = await runMinipro(buildChipInfoArgs(this.database, chip), { onLog: (line) => this.appendLog(line) });
+    this.render();
+    const result = await runMinipro(buildChipInfoArgs(database, chip), { onLog: (line) => this.appendLog(line) });
+    if (requestId !== this.chipInfoRequestId || this.database !== database || this.selectedChip !== chip) return;
     this.chipInfo = parseChipInfo(result.stdout);
     if (!this.chipInfo.name) this.chipInfo.name = chip;
     if (this.chipInfo.raw.trim()) this.chipInfoCache.set(chip, this.chipInfo);
     this.render();
   }
 
-  private async prefetchChipInfo(chips: string[]): Promise<void> {
+  private async prefetchChipInfo(chips: string[], database: ProgrammerKind): Promise<void> {
     const missing = chips.filter((chip) => !this.chipInfoCache.has(chip));
     await Promise.all(
       missing.map(async (chip) => {
-        const result = await runMinipro(buildChipInfoArgs(this.database, chip));
-        if (result.exitCode !== 0 || !result.stdout.trim()) return;
+        const result = await runMinipro(buildChipInfoArgs(database, chip));
+        if (this.database !== database || result.exitCode !== 0 || !result.stdout.trim()) return;
         const info = parseChipInfo(result.stdout);
         if (!info.name) info.name = chip;
         this.chipInfoCache.set(chip, info);
@@ -821,6 +836,15 @@ export class MiniproTuiApp {
   private requireComponents(): Components {
     if (!this.components) throw new Error("Components are not initialized.");
     return this.components;
+  }
+
+  private captureFocusedControl(): (() => void) | undefined {
+    const components = this.components;
+    if (!components) return undefined;
+    for (const control of [components.fileQuery, components.files, components.chipQuery, components.chips]) {
+      if (control.focused) return () => control.focus();
+    }
+    return undefined;
   }
 }
 

@@ -56,8 +56,8 @@ export class DialogController {
         if (settled) return;
         settled = true;
         modal.onKeyDown = undefined;
-        renderer.root.remove(modal.id);
-        renderer.root.remove(backdrop.id);
+        modal.blur();
+        this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
       };
@@ -129,8 +129,8 @@ export class DialogController {
         settled = true;
         input.onKeyDown = undefined;
         input.off(InputRenderableEvents.ENTER, submit);
-        renderer.root.remove(modal.id);
-        renderer.root.remove(backdrop.id);
+        input.blur();
+        this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
       };
@@ -177,8 +177,8 @@ export class DialogController {
         settled = true;
         select.onKeyDown = undefined;
         select.off(SelectRenderableEvents.ITEM_SELECTED, selected);
-        renderer.root.remove(modal.id);
-        renderer.root.remove(backdrop.id);
+        select.blur();
+        this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
       };
@@ -215,8 +215,8 @@ export class DialogController {
         if (settled) return;
         settled = true;
         modal.onKeyDown = undefined;
-        renderer.root.remove(modal.id);
-        renderer.root.remove(backdrop.id);
+        modal.blur();
+        this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve();
       };
@@ -270,6 +270,14 @@ export class DialogController {
     const label = truncateEnd(title, titleWidth);
     const content = `${label}${" ".repeat(Math.max(1, width - label.length - esc.length))}${esc}`;
     modal.add(new TextRenderable(renderer, { content, width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 }));
+  }
+
+  private closeModal(renderer: CliRenderer, modal: BoxRenderable, backdrop: BoxRenderable): void {
+    renderer.root.remove(modal.id);
+    renderer.root.remove(backdrop.id);
+    modal.destroyRecursively();
+    backdrop.destroyRecursively();
+    renderer.root.requestRender();
   }
 
   private selectOptions(id: string, height: number): ConstructorParameters<typeof SelectRenderable>[1] {
