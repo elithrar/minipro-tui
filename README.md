@@ -4,7 +4,7 @@
 
 It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, compare, pin check, blank check, verify, and safe write workflows without shell interpolation.
 
-<img width="1000" alt="minipro TUI screenshot of the workbench" src="https://github.com/user-attachments/assets/3d0117c1-12b4-4548-9def-e9e325a7a1fe" />
+<img width="1000" alt="minipro TUI screenshot of the workbench" src="https://github.com/user-attachments/assets/73f3df7b-0673-413b-acb4-8b2c70c00704" />
 
 ## Requirements
 
