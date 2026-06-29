@@ -2,7 +2,7 @@
   "name": "minipro-tui",
   "module": "src/main.ts",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "1.3.14"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -15,6 +15,6 @@
   },
   "type": "module",
   "dependencies": {
-    "@opentui/core": "^0.4.1"
+    "@opentui/core": "^0.4.2"
   }
 }
