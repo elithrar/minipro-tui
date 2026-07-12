@@ -1,4 +1,4 @@
-import { mkdir, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, stat, truncate, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { expect, test } from "bun:test";
@@ -78,4 +78,14 @@ test("hashing rejects stale file metadata", async () => {
 
 test("short SHA output is stable", () => {
   expect(shortSha("1234567890abcdef", 8)).toBe("12345678");
+});
+
+test("scanner does not hash files larger than the operation limit", async () => {
+  const dir = join(import.meta.dir, ".tmp-files-large");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "oversized.bin");
+  await writeFile(path, "");
+  await truncate(path, 64 * 1024 * 1024 + 1);
+  const files = await scanFiles(dir);
+  expect(files.find((file) => file.path === path)?.sha256Short).toBe("too-large");
 });

@@ -70,3 +70,10 @@ test("keeps unknown chip info lines nonfatal", () => {
   const raw = "Name: FOO\nUnexpected: value\nMemory: 1,024 Bytes";
   expect(parseChipInfo(raw)).toEqual({ name: "FOO", memoryBytes: 1024, raw });
 });
+
+test("parses the leading code-memory region from compound descriptions", () => {
+  const info = parseChipInfo("Name: PIC16F84A@DIP18\nMemory: 1024 Words + 64 Bytes");
+  expect(info.memoryBytes).toBe(2048);
+  expect(parseChipInfo("Name: MCU\nMemory: 8192 Bytes + 256 Bytes").memoryBytes).toBe(8192);
+  expect(parseChipInfo("Name: PROM\nMemory: 65536 Bits").memoryBytes).toBe(8192);
+});

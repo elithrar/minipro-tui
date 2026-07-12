@@ -147,7 +147,8 @@ function isCommandLogLine(line: string): boolean {
 function formatFitValue(input: StatusSummaryInput): string {
   if (!input.selectedFile || !input.selectedChip) return "WAIT select file+chip";
   if (!input.chipInfo) return "WAIT load chip info";
-  if (input.chipInfo.memoryBytes === undefined) return "WARN chip size unknown";
+  if (input.chipInfo.memoryBytes === undefined) return input.advanced.allowSizeMismatch ? "OVERRIDE chip size unknown" : "BLOCKED chip size unknown";
+  if (/\.(hex|srec)$/i.test(input.selectedFile.name)) return "CHECK structured image normalized on confirm";
   if (input.selectedFile.size === input.chipInfo.memoryBytes) return `OK ${formatBytes(input.selectedFile.size)}`;
 
   const mode = input.advanced.allowSizeMismatch ? "Override" : "Blocked";
@@ -188,7 +189,8 @@ function statusRows(input: StatusSummaryInput): StatusRow[] {
   const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
   return [
     { label: "Fit", value: formatFitValue(input) },
-    stageRow("Erase", !input.advanced.skipErase, true),
+    stageRow("Backup", Boolean(input.advanced.backupBeforeWrite), false),
+    stageRow("Erase", !input.advanced.skipErase, false),
     stageRow("Blank", true, false),
     stageRow("Write", true, false),
     stageRow("Verify", !input.advanced.skipVerify, true),
@@ -234,9 +236,9 @@ function formatDangerousOptions(options: AdvancedOptions): string[] {
   return [
     options.allowSizeMismatch ? "size mismatch allowed" : undefined,
     options.disableReadbackCompare ? "readback compare off" : undefined,
-    options.skipErase ? "erase skipped" : undefined,
     options.skipVerify ? "verify skipped" : undefined,
     options.ignoreIdMismatch ? "ID mismatch ignored" : undefined,
     options.skipIdRead ? "ID read skipped" : undefined,
+    options.allowUnsupportedPinCheck ? "unsupported pin check allowed" : undefined,
   ].filter((item): item is string => item !== undefined);
 }

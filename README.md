@@ -34,12 +34,14 @@ or:
 bun run dev
 ```
 
-Build a standalone binary:
+Build a compiled executable:
 
 ```bash
 bun run build
 ./minipro-tui
 ```
+
+Run the executable from an installed project directory so the platform-specific OpenTUI native package in `node_modules` remains available.
 
 Test:
 
@@ -57,12 +59,16 @@ minipro -q <programmer> -d <chip>
 minipro -p <chip> -z
 minipro -p <chip> -E
 minipro -p <chip> -b
-minipro -p <chip> -w <file>
+minipro -p <chip> -w <confirmed-temp-file> --skip_erase --skip_verify
 minipro -p <chip> -m <file>
-minipro -p <chip> -r <temp-readback-file>
+minipro -p <chip> -r <temp-readback-file> -c code
 ```
 
-The app then compares the selected file and readback byte-for-byte and shows SHA-256 summaries in the log.
+The explicit erase, blank check, and verify happen around write, so the write command suppresses its redundant automatic erase and verify. The app freezes the confirmed bytes, then compares the selected image and readback byte-for-byte and shows SHA-256 summaries in the log. Intel HEX and S-record images are checksum-validated and normalized to raw bytes before size checks and hardware actions.
+
+Pin/contact checks that the programmer reports as unsupported block writes by default. Advanced Controls provides an explicit, warning-backed override for devices that cannot perform the check. Raw operation images are limited to 64 MiB and structured source images to 4 MiB to keep file freezing and normalization bounded.
+
+Enable `Pre-write backup` under Advanced Controls to read the selected memory region to a new file before erase. The backup is hashed, synced, and committed before the workflow can continue. Existing files are never replaced by hardware reads.
 
 ## Read Flow
 
@@ -70,10 +76,10 @@ Press `R` to read the selected chip. The app opens a confirmation dialog with an
 
 ```text
 minipro -k
-minipro -p <chip> -r <output-file>
+minipro -p <chip> -r <output-file> -c code
 ```
 
-After a successful read, the app hashes the output file and shows the SHA-256 checksum in the log.
+After a successful read, the app hashes and syncs a temporary output before atomically committing a new destination. Existing destinations are refused and failed reads preserve the filesystem. Reads default to the chip's `code` memory region so multi-region devices cannot create untracked sibling files.
 
 ## Compare Flow
 
@@ -81,7 +87,7 @@ Press `m` to compare the selected local file against the current contents of the
 
 ```text
 minipro -k
-minipro -p <chip> -r <temp-compare-readback-file>
+minipro -p <chip> -r <temp-compare-readback-file> -c code
 ```
 
 The dialog reports `matched` when the hashes are identical and `files do not match` when they differ.
@@ -89,8 +95,12 @@ The dialog reports `matched` when the hashes are identical and `files do not mat
 ## Keys
 
 ```text
-q quit | r refresh | R read | m compare | p programmer | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | l log | ? help
+q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
 ```
+
+When the footer shows `esc cancel`, Escape safely cancels the active detection, read, check, verify, or readback command. Erase and write transfers are intentionally non-cancellable. Terminals narrower than 90 columns switch to Files, Chips, Status, and Log tabs.
+
+The selected programmer database, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/minipro-tui/state.json`. Overrides that weaken hardware checks always reset on launch.
 
 ## Credit
 

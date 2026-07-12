@@ -1,15 +1,20 @@
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 
 import {
   BoxRenderable,
+  CliRenderEvents,
   createCliRenderer,
   InputRenderable,
   InputRenderableEvents,
   RGBA,
   RenderableEvents,
+  ScrollBoxRenderable,
   SelectRenderable,
   SelectRenderableEvents,
+  TabSelectRenderable,
+  TabSelectRenderableEvents,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -18,10 +23,12 @@ import {
 
 import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerDatabase, ProgrammerKind, ProgrammerStatus } from "./types";
 import { sha256Bytes } from "./files/hash";
+import { MAX_IMAGE_FILE_BYTES, normalizeImageBytes } from "./files/image";
 import { isFileEntry, scanFileTree } from "./files/scan";
 import {
   buildBlankCheckArgs,
   buildDefaultWritePreview,
+  buildDetectProgrammerArgs,
   buildPinCheckArgs,
   buildVerifyArgs,
   buildSearchChipsArgs,
@@ -30,10 +37,11 @@ import {
   runMinipro,
 } from "./minipro/commands";
 import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
-import { runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "./minipro/workflow";
-import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, hasDangerousOptions } from "./safety/options";
+import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type DestinationSnapshot } from "./minipro/workflow";
+import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings } from "./safety/options";
+import { loadState, saveState, type PersistedState } from "./state";
 import { DialogController } from "./tui/dialogs";
-import { formatChipLabel, formatFileTreeOption, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
+import { formatChipInfo, formatChipLabel, formatFileTreeOption, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
 
 const PRIMARY = "#ff8a00";
 const BG = "#0a0a0a";
@@ -52,9 +60,26 @@ const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
 const CHIP_INFO_PREFETCH_LIMIT = 12;
+const CHIP_INFO_PREFETCH_CONCURRENCY = 3;
 const RECENT_LIMIT = 8;
+const LOG_LINE_LIMIT = 2000;
+const COMPACT_WIDTH = 90;
+const COMPACT_HEIGHT = 22;
+
+type CompactPanel = "files" | "chips" | "status" | "log";
+
+export type MiniproTuiAppOptions = {
+  renderer?: CliRenderer;
+  commandRunner?: typeof runMinipro;
+  persistence?: boolean;
+  exit?: (code: number) => void;
+};
 
 type Components = {
+  main: BoxRenderable;
+  topRow: BoxRenderable;
+  compactTabs: TabSelectRenderable;
+  compactContent: BoxRenderable;
   statusBarBox: BoxRenderable;
   filesPanel: BoxRenderable;
   fileQuery: InputRenderable;
@@ -65,7 +90,8 @@ type Components = {
   statusPanel: BoxRenderable;
   statusSummary: TextRenderable;
   logPanel: BoxRenderable;
-  log: TextRenderable;
+  log: ScrollBoxRenderable;
+  logText: TextRenderable;
   footerBox: BoxRenderable;
 };
 
@@ -97,10 +123,22 @@ export class MiniproTuiApp {
   private restoreFocusAfterModal: (() => void) | undefined;
   private chipSearchRequestId = 0;
   private chipInfoRequestId = 0;
+  private chipSearchAbortController: AbortController | undefined;
   private fileOptionsKey = "";
   private chipOptionsKey = "";
   private statusLine = "";
   private footerLine = footerText();
+  private activeAbortController: AbortController | undefined;
+  private activeCommandCancellable = false;
+  private operationPending = false;
+  private readonly activeCommandControllers = new Set<AbortController>();
+  private readonly activeCommandPromises = new Set<Promise<unknown>>();
+  private compactMode = false;
+  private compactPanel: CompactPanel = "files";
+  private modalOriginPanel: CompactPanel | undefined;
+  private shuttingDown = false;
+  private stateSave: Promise<void> = Promise.resolve();
+  private readonly options: MiniproTuiAppOptions;
   private readonly dialogs = new DialogController({
     getRenderer: () => this.requireRenderer(),
     theme: {
@@ -114,6 +152,8 @@ export class MiniproTuiApp {
       muted: MUTED,
     },
     onOpen: () => {
+      const focus = this.focusLabel();
+      this.modalOriginPanel = focus === "Chip Search" || focus === "Chip Results" ? "chips" : focus === "Log" ? "log" : focus === "File Search" || focus === "Files" ? "files" : this.compactPanel;
       this.restoreFocusAfterModal = this.captureFocusedControl();
       this.modalActive = true;
     },
@@ -121,18 +161,30 @@ export class MiniproTuiApp {
       this.modalActive = false;
       this.restoreFocusAfterModal?.();
       this.restoreFocusAfterModal = undefined;
+      this.modalOriginPanel = undefined;
       this.render();
     },
   });
 
+  constructor(options: MiniproTuiAppOptions = {}) {
+    this.options = options;
+  }
+
   async start(): Promise<void> {
-    this.renderer = await createCliRenderer({
+    const saved = this.options.persistence === false ? undefined : await loadState();
+    if (saved) this.restoreState(saved);
+    this.renderer = this.options.renderer ?? await createCliRenderer({
       exitOnCtrlC: false,
       consoleMode: "disabled",
       backgroundColor: BG,
     });
     this.components = this.createLayout(this.renderer);
     this.bindKeys(this.renderer, this.components);
+    this.applyResponsiveLayout();
+    this.renderer.on(CliRenderEvents.RESIZE, () => {
+      this.applyResponsiveLayout();
+      setTimeout(() => this.render(), 0);
+    });
     this.render();
     await this.refresh();
     await this.searchChip(DEFAULT_CHIP_QUERY, true);
@@ -158,7 +210,34 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const topRow = new BoxRenderable(renderer, { id: "top-row", height: "33%", width: "100%", flexDirection: "row", marginBottom: 1 });
+    const compactTabs = new TabSelectRenderable(renderer, {
+      id: "compact-tabs",
+      width: "100%",
+      height: 1,
+      tabWidth: 10,
+      options: [
+        { name: "Files", description: "Browse images", value: "files" },
+        { name: "Chips", description: "Search devices", value: "chips" },
+        { name: "Status", description: "Review safety", value: "status" },
+        { name: "Log", description: "Command output", value: "log" },
+      ],
+      showDescription: false,
+      showUnderline: true,
+      wrapSelection: true,
+      backgroundColor: BG,
+      focusedBackgroundColor: BG,
+      selectedBackgroundColor: PRIMARY,
+      selectedTextColor: SELECTED_TEXT,
+    });
+    const compactContent = new BoxRenderable(renderer, {
+      id: "compact-content",
+      width: "100%",
+      flexGrow: 1,
+      backgroundColor: BG,
+      flexDirection: "column",
+    });
+
+    const topRow = new BoxRenderable(renderer, { id: "top-row", height: 15, width: "100%", flexDirection: "row", marginBottom: 1 });
     const filesPanel = panel(renderer, "files-panel", "Files");
     filesPanel.marginRight = 1;
     const fileQuery = new InputRenderable(renderer, {
@@ -213,7 +292,18 @@ export class MiniproTuiApp {
     const logPanel = panel(renderer, "log-panel", "Actions / Log");
     logPanel.flexGrow = 1;
     logPanel.width = "100%";
-    const log = new TextRenderable(renderer, { id: "log", width: "100%", height: "100%", fg: TEXT, bg: PANEL, wrapMode: "word" });
+    const log = new ScrollBoxRenderable(renderer, {
+      id: "log",
+      width: "100%",
+      height: "100%",
+      stickyScroll: true,
+      stickyStart: "bottom",
+      rootOptions: { backgroundColor: PANEL },
+      viewportOptions: { backgroundColor: PANEL },
+      contentOptions: { backgroundColor: PANEL },
+    });
+    const logText = new TextRenderable(renderer, { id: "log-text", width: "100%", fg: TEXT, bg: PANEL, wrapMode: "word" });
+    log.add(logText);
     logPanel.add(log);
 
     const footerBox = lineBox(renderer, "footer", BG, () => this.footerLine);
@@ -229,7 +319,7 @@ export class MiniproTuiApp {
     renderer.root.add(root);
     files.focus();
 
-    return { statusBarBox, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, footerBox };
+    return { main, topRow, compactTabs, compactContent, statusBarBox, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, logText, footerBox };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -241,27 +331,49 @@ export class MiniproTuiApp {
         return;
       }
 
+      if ((key.name === "escape" || key.name === "esc") && this.job.kind === "running" && this.activeCommandCancellable) {
+        consumeKey(key);
+        this.appendLog(`Cancelling ${this.job.step}.`);
+        this.activeAbortController?.abort();
+        return;
+      }
+
+      if (this.operationPending) {
+        consumeKey(key);
+        return;
+      }
+
       if (components.fileQuery.focused || components.chipQuery.focused) {
-        if (key.name === "tab") this.focusNext();
+        if (key.name === "tab") {
+          consumeKey(key);
+          this.focusNext();
+        }
         return;
       }
 
       if (key.name === "q") {
+        consumeKey(key);
         void this.quit();
         return;
       }
 
       if (key.name === "tab") {
+        consumeKey(key);
         this.focusNext();
         return;
       }
 
       if (key.name === "/") {
+        consumeKey(key);
+        this.showCompactPanel("chips");
+        components.chipQuery.focus();
         void this.searchChip(components.chipQuery.value.trim() || this.chipQuery || DEFAULT_CHIP_QUERY, false, true);
         return;
       }
 
       if (key.name === "f") {
+        consumeKey(key);
+        this.showCompactPanel("files");
         components.fileQuery.focus();
         this.render();
         return;
@@ -279,37 +391,42 @@ export class MiniproTuiApp {
       }
 
       if (key.name === "r" && (key.shift || key.sequence === "R")) {
-        void this.readFlow();
+        this.startOperation(() => this.readFlow());
         return;
       }
 
       switch (key.name) {
         case "r":
-          void this.refresh();
+          this.startOperation(() => this.refresh());
           break;
         case "p":
           void this.pickProgrammerDatabase();
           break;
         case "c":
-          void this.singleChipAction("pin/contact check", buildPinCheckArgs);
+          this.startOperation(() => this.singleChipAction("pin/contact check", buildPinCheckArgs));
           break;
         case "b":
-          void this.singleChipAction("blank check", buildBlankCheckArgs);
+          this.startOperation(() => this.singleChipAction("blank check", buildBlankCheckArgs));
           break;
         case "v":
-          void this.verifySelectedFile();
+          this.startOperation(() => this.verifySelectedFile());
           break;
         case "m":
-          void this.compareFlow();
+          this.startOperation(() => this.compareFlow());
           break;
         case "w":
-          void this.writeFlow();
+          this.startOperation(() => this.writeFlow());
           break;
         case "a":
           void this.advancedModal();
           break;
         case "l":
-          void this.dialogs.message("Full Log", this.logLines.join("\n") || "No log output yet.");
+          this.showCompactPanel("log");
+          components.log.focus();
+          this.render();
+          break;
+        case "i":
+          void this.showChipInfo();
           break;
         case "?":
           void this.help();
@@ -344,7 +461,11 @@ export class MiniproTuiApp {
       void this.selectChip(String(option.value ?? option.name));
     });
 
-    for (const focusable of [components.fileQuery, components.files, components.chipQuery, components.chips]) {
+    components.compactTabs.on(TabSelectRenderableEvents.SELECTION_CHANGED, (_index: number, option) => {
+      if (isCompactPanel(option.value)) this.setCompactPanel(option.value);
+    });
+
+    for (const focusable of [components.compactTabs, components.fileQuery, components.files, components.chipQuery, components.chips, components.log]) {
       focusable.on(RenderableEvents.FOCUSED, () => this.render());
       focusable.on(RenderableEvents.BLURRED, () => this.render());
     }
@@ -353,23 +474,28 @@ export class MiniproTuiApp {
   private async refresh(): Promise<void> {
     if (this.job.kind === "running") return;
     this.appendLog("Refreshing files and programmer status.");
+    this.setJob({ kind: "running", step: "refresh" });
+    try {
+      await this.refreshFiles();
 
-    await this.refreshFiles();
+      const databases = await this.executeCommand(["-Q"], { onLog: (line) => this.appendLog(line) });
+      this.programmerDatabases = parseProgrammerDatabases(commandText(databases));
+      if (this.programmerDatabases.length > 0) {
+        this.appendLog(`Available programmer databases: ${this.programmerDatabases.map((db) => db.kind).join(", ")}`);
+      }
 
-    const databases = await runMinipro(["-Q"], { onLog: (line) => this.appendLog(line) });
-    this.programmerDatabases = parseProgrammerDatabases(databases.stdout);
-    if (this.programmerDatabases.length > 0) {
-      this.appendLog(`Available programmer databases: ${this.programmerDatabases.map((db) => db.kind).join(", ")}`);
+      const status = await this.executeCommand(["-k"], { onLog: (line) => this.appendLog(line) });
+      this.programmerStatus = status.exitCode === 0 ? parseProgrammerStatus(`${status.stdout}\n${status.stderr}`) : { connected: false, raw: `${status.stdout}\n${status.stderr}` };
+      if (this.programmerStatus.kind && this.programmerStatus.kind !== this.database) {
+        this.database = this.programmerStatus.kind;
+        this.chipInfoCache.clear();
+        this.selectedChip = undefined;
+        this.chipInfo = undefined;
+      }
+      this.setJob({ kind: "idle" });
+    } catch (error) {
+      this.setJob({ kind: "failed", step: "refresh", message: error instanceof Error ? error.message : String(error) });
     }
-
-    const status = await runMinipro(["-k"], { onLog: (line) => this.appendLog(line) });
-    this.programmerStatus = parseProgrammerStatus(`${status.stdout}\n${status.stderr}`);
-    if (this.programmerStatus.kind && this.programmerStatus.kind !== this.database) {
-      this.database = this.programmerStatus.kind;
-      this.chipInfoCache.clear();
-    }
-    this.job = { kind: "idle" };
-    this.render();
   }
 
   private async refreshFiles(): Promise<void> {
@@ -382,17 +508,20 @@ export class MiniproTuiApp {
 
   private async searchChip(query: string, preferDefault: boolean, focusResults = false): Promise<void> {
     if (this.job.kind === "running") return;
+    this.chipSearchAbortController?.abort();
+    const controller = new AbortController();
+    this.chipSearchAbortController = controller;
     const requestId = ++this.chipSearchRequestId;
     const database = this.database;
     this.chipQuery = query;
     const components = this.requireComponents();
     components.chipQuery.value = query;
     this.appendLog(`Searching ${database} database for ${query}.`);
-    const result = await runMinipro(buildSearchChipsArgs(database, query), { onLog: (line) => this.appendLog(line) });
+    const result = await this.executeCommand(buildSearchChipsArgs(database, query), { onLog: (line) => this.appendLog(line), signal: controller.signal });
     if (requestId !== this.chipSearchRequestId || this.database !== database || this.chipQuery !== query) return;
     this.chipResults = orderChipResults(result.exitCode === 0 ? parseChipSearch(result.stdout) : [], query);
 
-    await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT), database);
+    await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT), database, controller.signal);
     if (requestId !== this.chipSearchRequestId || this.database !== database || this.chipQuery !== query) return;
 
     const defaultChip = preferDefault ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY) : undefined;
@@ -402,6 +531,7 @@ export class MiniproTuiApp {
     this.render();
 
     if (defaultChip) await this.selectChip(defaultChip);
+    if (this.chipSearchAbortController === controller) this.chipSearchAbortController = undefined;
   }
 
   private async selectFileTreeEntry(path: string, logSelection = false): Promise<void> {
@@ -417,6 +547,7 @@ export class MiniproTuiApp {
     this.selectedFile = file;
     if (logSelection) {
       this.recentFilePaths = rememberRecent(this.recentFilePaths, file.path);
+      this.queueStateSave();
       this.appendLog(`Selected file ${file.name} (${file.size} B, ${file.sha256Short}).`);
     } else if (changed) this.render();
   }
@@ -424,6 +555,7 @@ export class MiniproTuiApp {
   private async openFileDirectory(path: string): Promise<void> {
     this.fileDirectory = path === ".." ? resolve(this.fileDirectory, "..") : path;
     this.recentDirectories = rememberRecent(this.recentDirectories, this.fileDirectory);
+    this.queueStateSave();
     this.fileQuery = "";
     this.requireComponents().fileQuery.value = "";
     this.appendLog(`Browsing files in ${this.fileDirectory}.`);
@@ -433,30 +565,54 @@ export class MiniproTuiApp {
 
   private async selectChip(chip: string): Promise<void> {
     if (!chip || this.job.kind === "running") return;
+    const cached = this.chipInfoCache.get(chip);
+    if (cached) {
+      this.selectedChip = chip;
+      this.chipInfo = cached;
+      this.recentChips = rememberRecent(this.recentChips, chip);
+      this.queueStateSave();
+      this.appendLog(`Selected chip ${chip}.`);
+      return;
+    }
+
     const requestId = ++this.chipInfoRequestId;
     const database = this.database;
     this.selectedChip = chip;
     this.chipInfo = undefined;
     this.recentChips = rememberRecent(this.recentChips, chip);
+    this.queueStateSave();
     this.appendLog(`Loading chip info for ${chip}.`);
     this.render();
-    const result = await runMinipro(buildChipInfoArgs(database, chip), { onLog: (line) => this.appendLog(line) });
+    const result = await this.executeCommand(buildChipInfoArgs(database, chip), { onLog: (line) => this.appendLog(line) });
     if (requestId !== this.chipInfoRequestId || this.database !== database || this.selectedChip !== chip) return;
-    this.chipInfo = parseChipInfo(result.stdout);
+    const output = commandText(result);
+    if (result.exitCode !== 0 || !output.trim()) {
+      this.appendLog(`Could not load chip info for ${chip}.`);
+      this.chipInfo = undefined;
+      this.render();
+      return;
+    }
+    this.chipInfo = parseChipInfo(output);
     if (!this.chipInfo.name) this.chipInfo.name = chip;
     if (this.chipInfo.raw.trim()) this.chipInfoCache.set(chip, this.chipInfo);
     this.render();
   }
 
-  private async prefetchChipInfo(chips: string[], database: ProgrammerKind): Promise<void> {
+  private async prefetchChipInfo(chips: string[], database: ProgrammerKind, signal: AbortSignal): Promise<void> {
     const missing = chips.filter((chip) => !this.chipInfoCache.has(chip));
     await Promise.all(
-      missing.map(async (chip) => {
-        const result = await runMinipro(buildChipInfoArgs(database, chip));
-        if (this.database !== database || result.exitCode !== 0 || !result.stdout.trim()) return;
-        const info = parseChipInfo(result.stdout);
-        if (!info.name) info.name = chip;
-        this.chipInfoCache.set(chip, info);
+      Array.from({ length: Math.min(CHIP_INFO_PREFETCH_CONCURRENCY, missing.length) }, async () => {
+        for (;;) {
+          const chip = missing.shift();
+          if (!chip || signal.aborted) return;
+          const result = await this.executeCommand(buildChipInfoArgs(database, chip), { signal });
+          if (this.database !== database || signal.aborted) return;
+          const output = commandText(result);
+          if (result.exitCode !== 0 || !output.trim()) continue;
+          const info = parseChipInfo(output);
+          if (!info.name) info.name = chip;
+          this.chipInfoCache.set(chip, info);
+        }
       }),
     );
   }
@@ -474,6 +630,7 @@ export class MiniproTuiApp {
     if (!choice || !isProgrammerKind(String(choice.value))) return;
     this.database = String(choice.value) as ProgrammerKind;
     this.recentDatabases = rememberRecent(this.recentDatabases, this.database);
+    this.queueStateSave();
     this.chipInfoCache.clear();
     this.selectedChip = undefined;
     this.chipInfo = undefined;
@@ -488,9 +645,7 @@ export class MiniproTuiApp {
       this.render();
       return;
     }
-    this.setJob({ kind: "running", step });
-    const result = await runMinipro(buildArgs(this.selectedChip, this.advanced), { onLog: (line) => this.appendLog(line) });
-    this.setJob(result.exitCode === 0 ? { kind: "done", message: `${step} completed.` } : { kind: "failed", step, message: result.stderr || result.stdout });
+    await this.runConnectedAction(step, buildArgs(this.selectedChip, this.advanced));
   }
 
   private async verifySelectedFile(): Promise<void> {
@@ -500,9 +655,60 @@ export class MiniproTuiApp {
       this.render();
       return;
     }
-    this.setJob({ kind: "running", step: "verify" });
-    const result = await runMinipro(buildVerifyArgs(this.selectedChip, this.selectedFile.path, this.advanced), { onLog: (line) => this.appendLog(line) });
-    this.setJob(result.exitCode === 0 ? { kind: "done", message: "Verify completed." } : { kind: "failed", step: "verify", message: result.stderr || result.stdout });
+    const frozen = await freezeFileForOperation(this.selectedFile.path);
+    if (!frozen.ok) {
+      this.appendLog(frozen.message);
+      this.render();
+      return;
+    }
+
+    let tempDirectory: string | undefined;
+    try {
+      tempDirectory = await mkdtemp(join(tmpdir(), "minipro-tui-verify-"));
+      const verifyPath = join(tempDirectory, `${basename(this.selectedFile.path)}.confirmed.bin`);
+      await writeFile(verifyPath, frozen.bytes);
+      this.appendLog(`Verifying confirmed bytes: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}.`);
+      await this.runConnectedAction("verify", buildVerifyArgs(this.selectedChip, verifyPath, this.advanced));
+    } catch (error) {
+      this.setJob({ kind: "failed", step: "verify", message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (tempDirectory) await rm(tempDirectory, { recursive: true, force: true });
+    }
+  }
+
+  private async runConnectedAction(step: string, args: string[]): Promise<void> {
+    this.setJob({ kind: "running", step: "detect programmer" });
+    const detected = await this.runCommand(buildDetectProgrammerArgs(), true);
+    const status = parseProgrammerStatus(`${detected.stdout}\n${detected.stderr}`);
+    this.programmerStatus = status;
+    if (detected.exitCode !== 0 || !status.connected) {
+      this.setJob({ kind: "failed", step: "detect programmer", message: "No connected programmer detected." });
+      return;
+    }
+
+    this.setJob({ kind: "running", step });
+    const result = await this.runCommand(args, true);
+    if (step === "pin/contact check" && isPinCheckUnsupported(commandText(result))) {
+      this.setJob({ kind: "failed", step, message: "Pin/contact check is not supported for this programmer and chip." });
+      return;
+    }
+    this.setJob(result.exitCode === 0 ? { kind: "done", message: `${step} completed.` } : { kind: "failed", step, message: result.stderr || result.stdout });
+  }
+
+  private async runCommand(args: string[], cancellable: boolean) {
+    const controller = new AbortController();
+    this.activeAbortController = controller;
+    this.activeCommandCancellable = cancellable;
+    this.render();
+    try {
+      return await this.executeCommand(args, { onLog: (line) => this.appendLog(line), signal: controller.signal });
+    } finally {
+      if (this.activeAbortController === controller) {
+        this.activeAbortController = undefined;
+        this.activeCommandCancellable = false;
+        this.render();
+      }
+    }
   }
 
   private async writeFlow(): Promise<void> {
@@ -512,26 +718,53 @@ export class MiniproTuiApp {
       this.render();
       return;
     }
+    const selectedFile = this.selectedFile;
+    const selectedChip = this.selectedChip;
+    const chipInfo = { ...this.chipInfo };
+    const database = this.database;
+    const advanced = { ...this.advanced };
+    const fileDirectory = this.fileDirectory;
 
-    const frozen = await freezeFileForOperation(this.selectedFile.path);
+    let backupFile: string | undefined;
+    let backupDestinationSnapshot: DestinationSnapshot | undefined;
+    if (advanced.backupBeforeWrite) {
+      backupFile = await this.dialogs.filename("Pre-write Backup", join(fileDirectory, defaultBackupFilename(selectedChip)));
+      if (!backupFile) {
+        this.appendLog("Write flow cancelled before choosing a backup filename.");
+        return;
+      }
+      try {
+        backupDestinationSnapshot = await captureDestination(backupFile);
+      } catch (error) {
+        this.appendLog(`Cannot inspect backup destination: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+      if (backupDestinationSnapshot.exists) {
+        await this.dialogs.message("Backup File Exists", "Choose a new backup filename. Existing files are never replaced by a hardware read.");
+        this.appendLog("Write flow cancelled to preserve the existing backup file.");
+        return;
+      }
+    }
+
+    const frozen = await freezeFileForOperation(selectedFile.path);
     if (!frozen.ok) {
       this.appendLog(frozen.message);
       this.render();
       return;
     }
 
-    const preview = buildDefaultWritePreview(this.selectedChip, this.selectedFile.path, this.database, this.advanced)
+    const preview = buildDefaultWritePreview(selectedChip, selectedFile.path, database, advanced, backupFile)
       .map((args) => JSON.stringify(["minipro", ...args]))
       .join("\n");
     const confirmed = await this.dialogs.confirm(
       "Write Chip",
       [
-        `This will check, erase, write, verify, and read back ${basename(this.selectedFile.path)} to ${this.selectedChip}.`,
+        `${formatWriteActionSummary(advanced, Boolean(backupFile))} ${basename(selectedFile.path)} to ${selectedChip}.`,
         `Confirmed bytes: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}`,
         "",
         preview,
         "",
-        ...dangerousOptionWarnings(this.advanced),
+        ...dangerousOptionWarnings(advanced),
       ].join("\n"),
       "Write",
     );
@@ -540,27 +773,21 @@ export class MiniproTuiApp {
       return;
     }
 
-    if (hasDangerousOptions(this.advanced)) {
-      const confirmDanger = await this.dialogs.confirm("Dangerous Options", dangerousOptionWarnings(this.advanced).join("\n"), "Continue");
-      if (!confirmDanger) {
-        this.appendLog("Write flow cancelled because dangerous options were not confirmed.");
-        return;
-      }
-    }
-
     this.setJob({ kind: "running", step: "write flow" });
     const result = await runDefaultWriteWorkflow({
-      file: this.selectedFile,
-      chip: this.selectedChip,
-      chipInfo: this.chipInfo,
-      programmerKind: this.database,
+      file: selectedFile,
+      chip: selectedChip,
+      chipInfo,
+      programmerKind: database,
       confirmed: true,
       confirmedBytes: frozen.bytes,
       confirmedSha256: frozen.sha256,
-      advanced: this.advanced,
+      backupFile,
+      backupDestinationSnapshot,
+      advanced,
       runCommand: (args, step) => {
         this.setJob({ kind: "running", step });
-        return runMinipro(args, { onLog: (line) => this.appendLog(line) });
+        return this.runCommand(args, step !== "erase" && step !== "write");
       },
       onLog: (line) => this.appendLog(line),
     }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
@@ -576,24 +803,32 @@ export class MiniproTuiApp {
       this.render();
       return;
     }
+    const selectedChip = this.selectedChip;
+    const advanced = { ...this.advanced };
+    const fileDirectory = this.fileDirectory;
 
-    const outputFile = await this.dialogs.filename("Read Chip", join(this.fileDirectory, defaultReadFilename(this.selectedChip)));
+    const outputFile = await this.dialogs.filename("Read Chip", join(fileDirectory, defaultReadFilename(selectedChip)));
     if (!outputFile) {
       this.appendLog("Read cancelled.");
       return;
     }
 
-    if (await fileExists(outputFile)) {
-      const overwrite = await this.dialogs.confirm("Overwrite File", `${outputFile} already exists. Overwrite it?`, "Overwrite");
-      if (!overwrite) {
-        this.appendLog("Read cancelled to avoid overwriting an existing file.");
-        return;
-      }
+    let destinationSnapshot: DestinationSnapshot;
+    try {
+      destinationSnapshot = await captureDestination(outputFile);
+    } catch (error) {
+      this.appendLog(`Cannot inspect read destination: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (destinationSnapshot.exists) {
+      await this.dialogs.message("Read File Exists", "Choose a new output filename. Existing files are never replaced by a hardware read.");
+      this.appendLog("Read cancelled to preserve the existing file.");
+      return;
     }
 
     const confirmed = await this.dialogs.confirm(
       "Read Chip",
-      [`Read ${this.selectedChip} to:`, outputFile, "", JSON.stringify(["minipro", ...buildReadArgs(this.selectedChip, outputFile, this.advanced)]), "", ...dangerousOptionWarnings(this.advanced)].join("\n"),
+      [`Read ${selectedChip} to:`, outputFile, "", JSON.stringify(["minipro", ...buildReadArgs(selectedChip, outputFile, advanced)]), "", ...dangerousOptionWarnings(advanced)].join("\n"),
       "Read",
     );
     if (!confirmed) {
@@ -603,13 +838,14 @@ export class MiniproTuiApp {
 
     this.setJob({ kind: "running", step: "read" });
     const result = await runReadWorkflow({
-      chip: this.selectedChip,
+      chip: selectedChip,
       outputFile,
+      destinationSnapshot,
       confirmed: true,
-      advanced: this.advanced,
+      advanced,
       runCommand: (args, step) => {
         this.setJob({ kind: "running", step });
-        return runMinipro(args, { onLog: (line) => this.appendLog(line) });
+        return this.runCommand(args, true);
       },
       onLog: (line) => this.appendLog(line),
     }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
@@ -626,8 +862,11 @@ export class MiniproTuiApp {
       this.render();
       return;
     }
+    const selectedChip = this.selectedChip;
+    const selectedFile = this.selectedFile;
+    const advanced = { ...this.advanced };
 
-    const frozen = await freezeFileForOperation(this.selectedFile.path);
+    const frozen = await freezeFileForOperation(selectedFile.path);
     if (!frozen.ok) {
       this.appendLog(frozen.message);
       this.render();
@@ -637,12 +876,12 @@ export class MiniproTuiApp {
     const confirmed = await this.dialogs.confirm(
       "Compare Chip",
       [
-        `Compare ${basename(this.selectedFile.path)} with the current contents of ${this.selectedChip}.`,
+        `Compare ${basename(selectedFile.path)} with the current contents of ${selectedChip}.`,
         `Local file: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}`,
         "",
-        JSON.stringify(["minipro", ...buildReadArgs(this.selectedChip, "<temp-compare-readback-file>", this.advanced)]),
+        JSON.stringify(["minipro", ...buildReadArgs(selectedChip, "<temp-compare-readback-file>", advanced)]),
         "",
-        ...dangerousOptionWarnings(this.advanced),
+        ...dangerousOptionWarnings(advanced),
       ].join("\n"),
       "Compare",
     );
@@ -653,15 +892,15 @@ export class MiniproTuiApp {
 
     this.setJob({ kind: "running", step: "compare" });
     const result = await runCompareWorkflow({
-      file: this.selectedFile,
-      chip: this.selectedChip,
+      file: selectedFile,
+      chip: selectedChip,
       confirmed: true,
       confirmedBytes: frozen.bytes,
       confirmedSha256: frozen.sha256,
-      advanced: this.advanced,
+      advanced,
       runCommand: (args, step) => {
         this.setJob({ kind: "running", step });
-        return runMinipro(args, { onLog: (line) => this.appendLog(line) });
+        return this.runCommand(args, true);
       },
       onLog: (line) => this.appendLog(line),
     }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
@@ -674,20 +913,26 @@ export class MiniproTuiApp {
   private async advancedModal(): Promise<void> {
     const choice = await this.dialogs.select("Advanced Controls", [
       { name: `Show all files: ${this.showAllFiles ? "on" : "off"}`, description: "Toggle current-folder file filter", value: "all" },
+      { name: `Pre-write backup: ${this.advanced.backupBeforeWrite ? "on" : "off"}`, description: "Read the current chip to a chosen file before erase", value: "backup" },
       { name: `Allow size mismatch: ${this.advanced.allowSizeMismatch ? "on" : "off"}`, description: "Dangerous: permits file/chip size mismatch", value: "s" },
       { name: `Disable readback compare: ${this.advanced.disableReadbackCompare ? "on" : "off"}`, description: "Dangerous: skips post-write byte compare", value: "r" },
-      { name: `Skip erase: ${this.advanced.skipErase ? "on" : "off"}`, description: "Dangerous: old contents may remain", value: "e" },
+      { name: `Skip explicit erase: ${this.advanced.skipErase ? "on" : "off"}`, description: "Only proceeds if the chip already passes blank check", value: "e" },
       { name: `Skip verify: ${this.advanced.skipVerify ? "on" : "off"}`, description: "Dangerous: skips verify", value: "v" },
       { name: `Ignore ID mismatch: ${this.advanced.ignoreIdMismatch ? "on" : "off"}`, description: "Dangerous: bypasses ID mismatch", value: "y" },
       { name: `Skip ID read: ${this.advanced.skipIdRead ? "on" : "off"}`, description: "Dangerous for read mode", value: "x" },
+      { name: `Allow unsupported pin check: ${this.advanced.allowUnsupportedPinCheck ? "on" : "off"}`, description: "Dangerous: proceeds without contact validation", value: "z" },
     ]);
     switch (choice?.value) {
       case "all":
         this.showAllFiles = !this.showAllFiles;
+        this.queueStateSave();
         await this.refresh();
         return;
       case "s":
         this.advanced.allowSizeMismatch = !this.advanced.allowSizeMismatch;
+        break;
+      case "backup":
+        this.advanced.backupBeforeWrite = !this.advanced.backupBeforeWrite;
         break;
       case "r":
         this.advanced.disableReadbackCompare = !this.advanced.disableReadbackCompare;
@@ -704,8 +949,14 @@ export class MiniproTuiApp {
       case "x":
         this.advanced.skipIdRead = !this.advanced.skipIdRead;
         break;
+      case "z":
+        this.advanced.allowUnsupportedPinCheck = !this.advanced.allowUnsupportedPinCheck;
+        break;
     }
-    if (choice) this.appendLog(`Advanced options: ${JSON.stringify(this.advanced)}`);
+    if (choice) {
+      this.appendLog(`Advanced options: ${JSON.stringify(this.advanced)}`);
+      this.queueStateSave();
+    }
     this.render();
   }
 
@@ -724,21 +975,134 @@ export class MiniproTuiApp {
     );
   }
 
+  private async showChipInfo(): Promise<void> {
+    if (!this.selectedChip || !this.chipInfo) {
+      this.appendLog("Cannot show chip details: select a chip and load its info first.");
+      return;
+    }
+    await this.dialogs.message(`Chip Details: ${this.selectedChip}`, formatChipInfo(this.chipInfo));
+  }
+
   private async quit(): Promise<void> {
-    if (this.job.kind === "running") {
+    if (this.job.kind === "running" || this.operationPending) {
       await this.dialogs.message("Job Running", "A hardware command is running. Quit is disabled until the command exits.");
       return;
     }
+    this.shuttingDown = true;
+    this.chipSearchRequestId++;
+    this.chipInfoRequestId++;
+    for (const controller of this.activeCommandControllers) controller.abort();
+    await Promise.allSettled([...this.activeCommandPromises]);
+    this.queueStateSave();
+    await this.stateSave;
     this.renderer?.destroy();
-    process.exit(0);
+    if (this.options.exit) this.options.exit(0);
+    else process.exit(0);
+  }
+
+  private startOperation(operation: () => Promise<void>): void {
+    if (this.operationPending || this.job.kind === "running") return;
+    this.operationPending = true;
+    this.chipSearchAbortController?.abort();
+    this.chipSearchRequestId++;
+    this.chipInfoRequestId++;
+    void operation()
+      .catch((error) => this.setJob({ kind: "failed", step: "operation", message: error instanceof Error ? error.message : String(error) }))
+      .finally(() => {
+        this.operationPending = false;
+        this.render();
+      });
+  }
+
+  private applyResponsiveLayout(): void {
+    const renderer = this.requireRenderer();
+    const components = this.requireComponents();
+    const compact = renderer.width < COMPACT_WIDTH || renderer.height < COMPACT_HEIGHT;
+    if (compact === this.compactMode) return;
+
+    if (compact) {
+      const focus = this.focusLabel();
+      if (focus === "Dialog" && this.modalOriginPanel) this.compactPanel = this.modalOriginPanel;
+      else if (focus === "Chip Search" || focus === "Chip Results") this.compactPanel = "chips";
+      else if (focus === "Log") this.compactPanel = "log";
+      else if (focus === "File Search" || focus === "Files") this.compactPanel = "files";
+      components.main.remove(components.topRow);
+      components.main.remove(components.logPanel);
+      components.main.insertBefore(components.compactTabs, components.footerBox);
+      components.main.insertBefore(components.compactContent, components.footerBox);
+      this.compactMode = true;
+      this.setCompactPanel(this.compactPanel);
+    } else {
+      for (const child of components.compactContent.getChildren()) components.compactContent.remove(child);
+      if (components.compactTabs.parent === components.main) components.main.remove(components.compactTabs);
+      if (components.compactContent.parent === components.main) components.main.remove(components.compactContent);
+
+      for (const panel of [components.filesPanel, components.chipPanel, components.statusPanel]) {
+        panel.parent?.remove(panel);
+        panel.width = "auto";
+        panel.flexGrow = 1;
+        panel.flexBasis = 0;
+        panel.marginBottom = 0;
+      }
+      components.filesPanel.marginRight = 1;
+      components.chipPanel.marginRight = 1;
+      components.statusPanel.marginRight = 0;
+      components.topRow.add(components.filesPanel);
+      components.topRow.add(components.chipPanel);
+      components.topRow.add(components.statusPanel);
+      components.main.insertBefore(components.topRow, components.footerBox);
+      components.main.insertBefore(components.logPanel, components.footerBox);
+      this.compactMode = false;
+      if (components.compactTabs.focused) {
+        const target = this.compactPanel === "chips" ? components.chipQuery : this.compactPanel === "log" ? components.log : components.fileQuery;
+        target.focus();
+      }
+    }
+    this.render();
+  }
+
+  private showCompactPanel(panel: CompactPanel): void {
+    if (!this.compactMode) return;
+    this.setCompactPanel(panel);
+    this.requireComponents().compactTabs.setSelectedIndex(compactPanelIndex(panel));
+  }
+
+  private setCompactPanel(panel: CompactPanel): void {
+    if (!this.compactMode) return;
+    const components = this.requireComponents();
+    const moveFocus = panel !== this.compactPanel && !components.compactTabs.focused && this.focusableControls().some((control) => control.focused);
+    const next = panel === "files" ? components.filesPanel : panel === "chips" ? components.chipPanel : panel === "status" ? components.statusPanel : components.logPanel;
+    for (const child of components.compactContent.getChildren()) {
+      if (child !== next) components.compactContent.remove(child);
+    }
+    next.parent?.remove(next);
+    next.width = "100%";
+    next.flexGrow = 1;
+    next.marginRight = 0;
+    next.marginBottom = 0;
+    components.compactContent.add(next);
+    this.compactPanel = panel;
+    if (moveFocus) {
+      const target = panel === "files" ? components.fileQuery : panel === "chips" ? components.chipQuery : panel === "log" ? components.log : components.compactTabs;
+      target.focus();
+    }
+    this.render();
   }
 
   private focusNext(): void {
-    const components = this.requireComponents();
-    const focusables = [components.fileQuery, components.files, components.chipQuery, components.chips];
+    const focusables = this.focusableControls();
     const current = focusables.findIndex((item) => item.focused);
     focusables[(current + 1) % focusables.length]?.focus();
     this.render();
+  }
+
+  private focusableControls(): Array<InputRenderable | SelectRenderable | ScrollBoxRenderable | TabSelectRenderable> {
+    const components = this.requireComponents();
+    if (!this.compactMode) return [components.fileQuery, components.files, components.chipQuery, components.chips, components.log];
+    if (this.compactPanel === "files") return [components.compactTabs, components.fileQuery, components.files];
+    if (this.compactPanel === "chips") return [components.compactTabs, components.chipQuery, components.chips];
+    if (this.compactPanel === "log") return [components.compactTabs, components.log];
+    return [components.compactTabs];
   }
 
   private setJob(job: JobState): void {
@@ -751,11 +1115,12 @@ export class MiniproTuiApp {
       const sanitized = sanitizeLogLine(part);
       if (sanitized.trim()) this.logLines.push(sanitized);
     }
+    if (this.logLines.length > LOG_LINE_LIMIT) this.logLines.splice(0, this.logLines.length - LOG_LINE_LIMIT);
     this.render();
   }
 
   private render(): void {
-    if (!this.components) return;
+    if (!this.components || this.shuttingDown) return;
     const focus = this.focusLabel();
     this.statusLine = `${formatStatusLine({
       programmerStatus: this.programmerStatus,
@@ -790,9 +1155,8 @@ export class MiniproTuiApp {
       chipResultCount: this.chipResults.length,
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
-    this.components.log.content = formatLogContent(this.logLines.slice(-120));
-    this.components.log.scrollY = this.components.log.maxScrollY;
-    this.footerLine = footerText();
+    this.components.logText.content = formatLogContent(this.logLines.slice(-500));
+    this.footerLine = this.activeCommandCancellable ? `esc cancel | ${footerText()}` : footerText();
     this.renderer?.root.requestRender();
   }
 
@@ -817,6 +1181,8 @@ export class MiniproTuiApp {
     if (components.files.focused) return "Files";
     if (components.chipQuery.focused) return "Chip Search";
     if (components.chips.focused) return "Chip Results";
+    if (components.log.focused) return "Log";
+    if (components.compactTabs.focused) return "Sections";
     return "Dialog";
   }
 
@@ -825,7 +1191,54 @@ export class MiniproTuiApp {
     setPanelFocus(components.filesPanel, `Files ${formatDirectoryLabel(this.fileDirectory)}`, focus === "File Search" || focus === "Files");
     setPanelFocus(components.chipPanel, "Chip Search", focus === "Chip Search" || focus === "Chip Results");
     setPanelFocus(components.statusPanel, "Status", false);
-    setPanelFocus(components.logPanel, "Actions / Log", false);
+    setPanelFocus(components.logPanel, "Actions / Log", focus === "Log");
+  }
+
+  private restoreState(state: PersistedState): void {
+    this.database = state.database;
+    this.showAllFiles = state.showAllFiles;
+    this.advanced = { ...DEFAULT_ADVANCED_OPTIONS, backupBeforeWrite: state.advanced.backupBeforeWrite };
+    this.recentFilePaths = state.recentFilePaths;
+    this.recentDirectories = state.recentDirectories;
+    this.recentChips = state.recentChips;
+    this.recentDatabases = state.recentDatabases;
+  }
+
+  private queueStateSave(): void {
+    if (this.options.persistence === false) return;
+    const state: PersistedState = {
+      version: 1,
+      database: this.database,
+      showAllFiles: this.showAllFiles,
+      advanced: { backupBeforeWrite: this.advanced.backupBeforeWrite },
+      recentFilePaths: [...this.recentFilePaths],
+      recentDirectories: [...this.recentDirectories],
+      recentChips: [...this.recentChips],
+      recentDatabases: [...this.recentDatabases],
+    };
+    this.stateSave = this.stateSave
+      .catch(() => undefined)
+      .then(() => saveState(state))
+      .catch((error) => {
+        if (this.components) this.appendLog(`Cannot save preferences: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  }
+
+  private async executeCommand(args: string[], options: Parameters<typeof runMinipro>[1] = {}) {
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    options.signal?.addEventListener("abort", forwardAbort, { once: true });
+    if (options.signal?.aborted) controller.abort();
+    this.activeCommandControllers.add(controller);
+    const promise = Promise.resolve().then(() => (this.options.commandRunner ?? runMinipro)(args, { ...options, signal: controller.signal }));
+    this.activeCommandPromises.add(promise);
+    try {
+      return await promise;
+    } finally {
+      options.signal?.removeEventListener("abort", forwardAbort);
+      this.activeCommandControllers.delete(controller);
+      this.activeCommandPromises.delete(promise);
+    }
   }
 
   private requireRenderer(): CliRenderer {
@@ -841,8 +1254,14 @@ export class MiniproTuiApp {
   private captureFocusedControl(): (() => void) | undefined {
     const components = this.components;
     if (!components) return undefined;
-    for (const control of [components.fileQuery, components.files, components.chipQuery, components.chips]) {
-      if (control.focused) return () => control.focus();
+    for (const control of this.focusableControls()) {
+      if (control.focused) {
+        return () => {
+          const focusables = this.focusableControls();
+          if (focusables.includes(control)) control.focus();
+          else focusables[0]?.focus();
+        };
+      }
     }
     return undefined;
   }
@@ -898,7 +1317,20 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
 }
 
 function footerText(): string {
-  return "q quit | tab focus | enter/space select | f files | / chips | r refresh | w write | m compare | R read | ? help";
+  return "q quit | tab focus | enter/space select | f files | / chips | i info | l log | r refresh | w write | m compare | R read | ? help";
+}
+
+function formatWriteActionSummary(options: AdvancedOptions, backup: boolean): string {
+  const stages = [
+    "check",
+    backup ? "back up" : undefined,
+    options.skipErase ? undefined : "erase",
+    "blank-check",
+    "write",
+    options.skipVerify ? undefined : "verify",
+    options.disableReadbackCompare ? undefined : "read back",
+  ].filter((stage): stage is string => Boolean(stage));
+  return `This will ${stages.join(", ")}`;
 }
 
 function truncateEnd(value: string, width: number): string {
@@ -1060,33 +1492,55 @@ function isProgrammerKind(value: string): value is ProgrammerKind {
   return value === "tl866a" || value === "tl866ii" || value === "t48" || value === "t56";
 }
 
+function isCompactPanel(value: unknown): value is CompactPanel {
+  return value === "files" || value === "chips" || value === "status" || value === "log";
+}
+
+function compactPanelIndex(panel: CompactPanel): number {
+  return panel === "files" ? 0 : panel === "chips" ? 1 : panel === "status" ? 2 : 3;
+}
+
+function consumeKey(key: KeyEvent): void {
+  key.preventDefault();
+  key.stopPropagation();
+}
+
+function commandText(result: { stdout: string; stderr: string }): string {
+  return [result.stdout, result.stderr].filter(Boolean).join("\n");
+}
+
+function isPinCheckUnsupported(output: string): boolean {
+  return /pin test is not supported|pin.*check.*not supported/i.test(output);
+}
+
 function defaultReadFilename(chip: string): string {
-  const stamp = new Date().toISOString().replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+  const stamp = filenameTimestamp();
   return `${sanitizeFilename(chip)}-${stamp}.bin`;
+}
+
+function defaultBackupFilename(chip: string): string {
+  return `${sanitizeFilename(chip)}-backup-${filenameTimestamp()}.bin`;
+}
+
+function filenameTimestamp(): string {
+  return new Date().toISOString().replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
 }
 
 function sanitizeFilename(value: string): string {
   return value.replace(/[^a-z0-9._-]+/gi, "_").replace(/^_+|_+$/g, "") || "readback";
 }
 
-async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function freezeFileForOperation(path: string): Promise<{ ok: true; bytes: Uint8Array; sha256: string } | { ok: false; message: string }> {
   try {
     const before = await stat(path);
+    if (before.size > MAX_IMAGE_FILE_BYTES) return { ok: false, message: `Selected image exceeds the ${MAX_IMAGE_FILE_BYTES} byte operation limit.` };
     const bytes = await readFile(path);
     const after = await stat(path);
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
       return { ok: false, message: "Selected file changed while preparing the operation. Refresh and reselect it before continuing." };
     }
-    return { ok: true, bytes, sha256: sha256Bytes(bytes) };
+    const normalized = normalizeImageBytes(path, bytes);
+    return { ok: true, bytes: normalized, sha256: sha256Bytes(normalized) };
   } catch (error) {
     return { ok: false, message: `Cannot read selected file before confirmation: ${error instanceof Error ? error.message : String(error)}` };
   }

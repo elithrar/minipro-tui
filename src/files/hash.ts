@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 
 type CacheEntry = {
   size: number;
@@ -15,14 +16,15 @@ export async function sha256File(path: string, size: number, mtimeMs: number): P
     return cached.sha256;
   }
 
-  const data = await readFile(path);
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
   const after = await stat(path);
   if (after.size !== size || after.mtimeMs !== mtimeMs) {
     hashCache.delete(path);
     throw new Error("File changed while hashing.");
   }
 
-  const sha256 = sha256Bytes(data);
+  const sha256 = hash.digest("hex");
   hashCache.set(path, { size, mtimeMs, sha256 });
   return sha256;
 }

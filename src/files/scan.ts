@@ -3,8 +3,10 @@ import { dirname, join, parse, resolve } from "node:path";
 
 import type { FileEntry, FileTreeEntry } from "../types";
 import { sha256File, shortSha } from "./hash";
+import { MAX_IMAGE_FILE_BYTES } from "./image";
 
 const LIKELY_BINARY_EXTENSIONS = new Set([".bin", ".rom", ".hex", ".srec", ".eep"]);
+const MAX_SCAN_HASH_BYTES = 128 * 1024 * 1024;
 
 export async function scanFiles(dir = process.cwd(), showAll = false): Promise<FileEntry[]> {
   const entries = await scanFileTree(dir, showAll);
@@ -21,6 +23,7 @@ export async function scanFileTree(dir = process.cwd(), showAll = false): Promis
   }
 
   const entries: FileTreeEntry[] = [];
+  let remainingHashBytes = MAX_SCAN_HASH_BYTES;
   const parent = dirname(root);
   if (parent !== root && root !== parse(root).root) {
     entries.push({ kind: "directory", name: "..", path: parent, modifiedAt: new Date(0) });
@@ -45,14 +48,21 @@ export async function scanFileTree(dir = process.cwd(), showAll = false): Promis
     try {
       const fileStat = await stat(path);
       if (!fileStat.isFile()) continue;
-      const sha256 = await sha256File(path, fileStat.size, fileStat.mtimeMs);
+      let sha256Short = "not-hashed";
+      if (fileStat.size <= MAX_IMAGE_FILE_BYTES && fileStat.size <= remainingHashBytes) {
+        const sha256 = await sha256File(path, fileStat.size, fileStat.mtimeMs);
+        sha256Short = shortSha(sha256);
+        remainingHashBytes -= fileStat.size;
+      } else if (fileStat.size > MAX_IMAGE_FILE_BYTES) {
+        sha256Short = "too-large";
+      }
       entries.push({
         kind: "file",
         name: dirent.name,
         path,
         size: fileStat.size,
         modifiedAt: fileStat.mtime,
-        sha256Short: shortSha(sha256),
+        sha256Short,
       });
     } catch {
       continue;

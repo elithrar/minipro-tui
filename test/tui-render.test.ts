@@ -67,7 +67,7 @@ test("status summary styles enabled and dangerous disabled stages", () => {
   });
 
   const onChunk = content.chunks.find((chunk) => chunk.text === "ON");
-  const offChunks = content.chunks.filter((chunk) => chunk.text === "OFF");
+  const offChunks = content.chunks.filter((chunk) => chunk.text === "OFF" && chunk.bg !== undefined);
   expect(onChunk?.attributes).toBe(TextAttributes.BOLD);
   expect(offChunks).toHaveLength(2);
   expect(offChunks.every((chunk) => chunk.attributes === TextAttributes.BOLD && chunk.bg !== undefined)).toBe(true);
@@ -89,6 +89,23 @@ test("status summary blocks size mismatch by default", () => {
 
   expect(summary).toContain("Fit      BLOCKED 4.0 KiB vs 8.0 KiB");
   expect(summary).not.toContain("Next");
+});
+
+test("status defers structured image sizing until normalization", () => {
+  const summary = formatStatusSummary({
+    programmerStatus: { connected: false, raw: "" },
+    database: "t48",
+    selectedChip: "AT28C64B",
+    selectedFile: { name: "image.hex", path: "image.hex", size: 24000, modifiedAt: new Date(0), sha256Short: "abc" },
+    chipInfo: { name: "AT28C64B", memoryBytes: 8192, raw: "" },
+    job: { kind: "idle" },
+    advanced: {},
+    fileCount: 1,
+    chipResultCount: 1,
+    showAllFiles: false,
+  });
+  expect(summary).toContain("CHECK structured image normalized on confirm");
+  expect(summary).not.toContain("BLOCKED");
 });
 
 test("status summary exposes dangerous overrides", () => {

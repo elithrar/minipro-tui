@@ -53,6 +53,7 @@ export type MiniproResult = {
   stdout: string;
   stderr: string;
   durationMs: number;
+  aborted?: boolean;
 };
 
 export type JobState =
@@ -79,4 +80,6 @@ export type AdvancedOptions = {
   ignoreIdMismatch?: boolean;
   skipIdRead?: boolean;
   disableReadbackCompare?: boolean;
+  backupBeforeWrite?: boolean;
+  allowUnsupportedPinCheck?: boolean;
 };

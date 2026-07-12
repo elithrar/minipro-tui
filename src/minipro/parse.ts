@@ -99,9 +99,13 @@ export function detectProgrammerKind(raw: string): ProgrammerKind | undefined {
 }
 
 function parseBytes(value: string): number | undefined {
-  const match = /([\d,]+)\s*bytes?/i.exec(value);
+  const match = /^([\d,]+)\s*(bytes?|words?|bits?)(?:\s*\+|$)/i.exec(value.trim());
   if (!match) return undefined;
-  return Number.parseInt(match[1]?.replaceAll(",", "") ?? "", 10);
+  const count = Number.parseInt(match[1]?.replaceAll(",", "") ?? "", 10);
+  const unit = match[2]?.toLowerCase();
+  if (unit?.startsWith("word")) return count * 2;
+  if (unit?.startsWith("bit")) return Math.ceil(count / 8);
+  return count;
 }
 
 function isProgrammerKind(value: string | undefined): value is ProgrammerKind {

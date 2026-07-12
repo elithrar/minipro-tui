@@ -1,8 +1,10 @@
 import {
   BoxRenderable,
+  CliRenderEvents,
   InputRenderable,
   InputRenderableEvents,
   RGBA,
+  ScrollBoxRenderable,
   SelectRenderable,
   SelectRenderableEvents,
   TextRenderable,
@@ -41,14 +43,14 @@ export class DialogController {
     const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 7));
     const modal = this.modalBox(renderer, textHeight + 6);
     this.addHeader(renderer, modal, title);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.muted, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
+    const body = this.scrollableText(renderer, content, textHeight);
+    body.marginBottom = 1;
+    modal.add(body);
     const buttonRow = new TextRenderable(renderer, { content: "", width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 });
     modal.add(buttonRow);
-    modal.add(new TextRenderable(renderer, { content: "left/right choose  enter select  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    modal.add(new TextRenderable(renderer, { content: "arrows choose  enter  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
     const backdrop = this.backdropBox(renderer);
-    renderer.root.add(backdrop);
-    renderer.root.add(modal);
-    renderer.root.requestRender();
+    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 8, (height) => { body.height = Math.max(1, height - 8); });
 
     return new Promise((resolve) => {
       let settled = false;
@@ -57,6 +59,7 @@ export class DialogController {
         settled = true;
         modal.onKeyDown = undefined;
         modal.blur();
+        unmount();
         this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
@@ -87,7 +90,15 @@ export class DialogController {
           renderButtons();
           return;
         }
-        if (key.name === "enter" || key.sequence === "\r" || key.sequence === "\n") {
+        if (isKey(key, "up")) {
+          body.scrollBy(-1);
+          return;
+        }
+        if (isKey(key, "down")) {
+          body.scrollBy(1);
+          return;
+        }
+        if (isSubmitKey(key)) {
           key.preventDefault();
           key.stopPropagation();
           done(active === "confirm");
@@ -118,9 +129,7 @@ export class DialogController {
     modal.add(input);
     modal.add(new TextRenderable(renderer, { content: "enter read  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
     const backdrop = this.backdropBox(renderer);
-    renderer.root.add(backdrop);
-    renderer.root.add(modal);
-    renderer.root.requestRender();
+    const unmount = this.mountModal(renderer, modal, backdrop, 8);
 
     return new Promise((resolve) => {
       let settled = false;
@@ -130,6 +139,7 @@ export class DialogController {
         input.onKeyDown = undefined;
         input.off(InputRenderableEvents.ENTER, submit);
         input.blur();
+        unmount();
         this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
@@ -144,6 +154,7 @@ export class DialogController {
         }
       };
       setTimeout(() => {
+        if (settled) return;
         input.focus();
         renderer.root.requestRender();
       }, 0);
@@ -166,9 +177,7 @@ export class DialogController {
     modal.add(select);
     modal.add(new TextRenderable(renderer, { content: "enter select  arrows move  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
     const backdrop = this.backdropBox(renderer);
-    renderer.root.add(backdrop);
-    renderer.root.add(modal);
-    renderer.root.requestRender();
+    const unmount = this.mountModal(renderer, modal, backdrop, modalHeight, (height) => { select.height = Math.max(1, height - 6); });
 
     return new Promise((resolve) => {
       let settled = false;
@@ -178,6 +187,7 @@ export class DialogController {
         select.onKeyDown = undefined;
         select.off(SelectRenderableEvents.ITEM_SELECTED, selected);
         select.blur();
+        unmount();
         this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve(value);
@@ -202,33 +212,33 @@ export class DialogController {
     const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 5));
     const modal = this.modalBox(renderer, textHeight + 4);
     this.addHeader(renderer, modal, title);
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: textHeight, fg: this.options.theme.muted, bg: this.options.theme.panel, wrapMode: "word", marginBottom: 1 }));
+    const body = this.scrollableText(renderer, content, textHeight);
+    body.marginBottom = 1;
+    modal.add(body);
     modal.add(new TextRenderable(renderer, { content: "enter/esc close", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
     const backdrop = this.backdropBox(renderer);
-    renderer.root.add(backdrop);
-    renderer.root.add(modal);
-    renderer.root.requestRender();
+    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 7, (height) => { body.height = Math.max(1, height - 7); });
 
     return new Promise((resolve) => {
       let settled = false;
       const done = () => {
         if (settled) return;
         settled = true;
-        modal.onKeyDown = undefined;
-        modal.blur();
+        body.onKeyDown = undefined;
+        body.blur();
+        unmount();
         this.closeModal(renderer, modal, backdrop);
         this.options.onClose();
         resolve();
       };
-      modal.onKeyDown = (key: KeyEvent) => {
-        if (isCancelKey(key) || isKey(key, "q") || key.name === "enter" || key.sequence === "\r" || key.sequence === "\n") {
+      body.onKeyDown = (key: KeyEvent) => {
+        if (isCancelKey(key) || isKey(key, "q") || isSubmitKey(key)) {
           key.preventDefault();
           key.stopPropagation();
           done();
         }
       };
-      modal.focusable = true;
-      modal.focus();
+      body.focus();
     });
   }
 
@@ -239,7 +249,7 @@ export class DialogController {
       id: `modal-${++this.nextModalId}`,
       position: "absolute",
       zIndex: 100,
-      top: Math.max(1, Math.floor(renderer.height / 4)),
+      top: Math.max(0, Math.floor((renderer.height - modalHeight) / 2)),
       left: Math.max(1, Math.floor((renderer.width - width) / 2)),
       width,
       height: modalHeight,
@@ -248,6 +258,45 @@ export class DialogController {
       padding: 1,
       flexDirection: "column",
     });
+  }
+
+  private mountModal(renderer: CliRenderer, modal: BoxRenderable, backdrop: BoxRenderable, desiredHeight: number, resizeContent?: (height: number) => void): () => void {
+    const resize = () => {
+      const width = modalWidth(renderer);
+      const height = clamp(desiredHeight, 1, maxModalHeight(renderer));
+      modal.width = width;
+      modal.height = height;
+      modal.left = Math.max(0, Math.floor((renderer.width - width) / 2));
+      modal.top = Math.max(0, Math.floor((renderer.height - height) / 2));
+      backdrop.width = renderer.width;
+      backdrop.height = renderer.height;
+      resizeContent?.(height);
+      renderer.root.requestRender();
+    };
+    renderer.root.add(backdrop);
+    renderer.root.add(modal);
+    renderer.on(CliRenderEvents.RESIZE, resize);
+    resize();
+    return () => renderer.off(CliRenderEvents.RESIZE, resize);
+  }
+
+  private scrollableText(renderer: CliRenderer, content: string, height: number): ScrollBoxRenderable {
+    const scroll = new ScrollBoxRenderable(renderer, {
+      width: "100%",
+      height,
+      scrollY: true,
+      rootOptions: { backgroundColor: this.options.theme.panel },
+      viewportOptions: { backgroundColor: this.options.theme.panel },
+      contentOptions: { backgroundColor: this.options.theme.panel },
+    });
+    scroll.add(new TextRenderable(renderer, {
+      content,
+      width: "100%",
+      fg: this.options.theme.muted,
+      bg: this.options.theme.panel,
+      wrapMode: "word",
+    }));
+    return scroll;
   }
 
   private backdropBox(renderer: CliRenderer): BoxRenderable {
@@ -273,8 +322,8 @@ export class DialogController {
   }
 
   private closeModal(renderer: CliRenderer, modal: BoxRenderable, backdrop: BoxRenderable): void {
-    renderer.root.remove(modal.id);
-    renderer.root.remove(backdrop.id);
+    renderer.root.remove(modal);
+    renderer.root.remove(backdrop);
     modal.destroyRecursively();
     backdrop.destroyRecursively();
     renderer.root.requestRender();
@@ -302,22 +351,22 @@ export class DialogController {
 }
 
 function maxModalHeight(renderer: CliRenderer): number {
-  return Math.max(6, Math.floor(renderer.height * 0.6));
+  return Math.max(1, Math.min(renderer.height, Math.floor(renderer.height * 0.75)));
 }
 
 function modalInnerWidth(renderer: CliRenderer): number {
-  return Math.max(20, modalWidth(renderer) - 2);
+  return Math.max(1, modalWidth(renderer) - 2);
 }
 
 function modalWidth(renderer: CliRenderer): number {
-  return clamp(60, 30, Math.max(30, renderer.width - 2));
+  return Math.max(1, Math.min(60, renderer.width - 2));
 }
 
 function formatConfirmButtons(active: "cancel" | "confirm", confirmLabel: string, width: number): string {
   const cancel = active === "cancel" ? "[cancel]" : " cancel ";
   const confirm = active === "confirm" ? `[${confirmLabel}]` : ` ${confirmLabel} `;
   const content = `${cancel} ${confirm}`;
-  return `${" ".repeat(Math.max(0, width - content.length))}${content}`;
+  return content.slice(0, Math.max(0, width));
 }
 
 function estimateWrappedRows(content: string, width: number): number {
@@ -341,4 +390,8 @@ function isCancelKey(key: KeyEvent): boolean {
 
 function isKey(key: KeyEvent, value: string): boolean {
   return key.name === value || key.sequence === value || key.raw === value;
+}
+
+function isSubmitKey(key: KeyEvent): boolean {
+  return key.name === "return" || key.name === "enter" || key.sequence === "\r" || key.sequence === "\n";
 }
