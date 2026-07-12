@@ -13,7 +13,6 @@ export function dangerousOptionWarnings(options: AdvancedOptions): string[] {
   if (options.ignoreIdMismatch) warnings.push("Ignore ID mismatch is enabled. The selected chip may not be the chip in the socket.");
   if (options.skipIdRead) warnings.push("Skip ID read is enabled for read mode. Chip identity checks may be bypassed.");
   if (options.disableReadbackCompare) warnings.push("Readback compare is disabled. The app will not compare the programmed bytes after writing.");
-  if (options.allowUnsupportedPinCheck) warnings.push("Unsupported pin/contact check override is enabled. Programming may proceed without electrical contact validation.");
 
   return warnings;
 }

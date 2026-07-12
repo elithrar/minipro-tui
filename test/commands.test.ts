@@ -31,8 +31,9 @@ test("passes chip names with package characters as one argv entry", () => {
 
 test("keeps user-requested dangerous overrides absent from default flow", () => {
   const args = buildDefaultWritePreview("AT28C64B", "image.bin", "t48").flat();
-  expect(args.filter((arg) => arg === "--skip_erase")).toHaveLength(1);
-  expect(args.filter((arg) => arg === "--skip_verify")).toHaveLength(1);
+  expect(args.filter((arg) => arg === "--unprotect")).toHaveLength(1);
+  expect(args).not.toContain("--skip_erase");
+  expect(args).not.toContain("--skip_verify");
   expect(args).not.toContain("--no_size_error");
   expect(args).not.toContain("--no_id_error");
 });
@@ -50,6 +51,7 @@ test("write preview reflects advanced options", () => {
   expect(commands.some((args) => args.includes("-r"))).toBe(false);
   expect(flat).toContain("--skip_erase");
   expect(flat).toContain("--skip_verify");
+  expect(flat).toContain("--unprotect");
   expect(flat).toContain("--no_size_error");
 });
 

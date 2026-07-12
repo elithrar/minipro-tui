@@ -920,7 +920,6 @@ export class MiniproTuiApp {
       { name: `Skip verify: ${this.advanced.skipVerify ? "on" : "off"}`, description: "Dangerous: skips verify", value: "v" },
       { name: `Ignore ID mismatch: ${this.advanced.ignoreIdMismatch ? "on" : "off"}`, description: "Dangerous: bypasses ID mismatch", value: "y" },
       { name: `Skip ID read: ${this.advanced.skipIdRead ? "on" : "off"}`, description: "Dangerous for read mode", value: "x" },
-      { name: `Allow unsupported pin check: ${this.advanced.allowUnsupportedPinCheck ? "on" : "off"}`, description: "Dangerous: proceeds without contact validation", value: "z" },
     ]);
     switch (choice?.value) {
       case "all":
@@ -948,9 +947,6 @@ export class MiniproTuiApp {
         break;
       case "x":
         this.advanced.skipIdRead = !this.advanced.skipIdRead;
-        break;
-      case "z":
-        this.advanced.allowUnsupportedPinCheck = !this.advanced.allowUnsupportedPinCheck;
         break;
     }
     if (choice) {

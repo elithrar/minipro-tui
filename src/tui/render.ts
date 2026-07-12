@@ -239,6 +239,5 @@ function formatDangerousOptions(options: AdvancedOptions): string[] {
     options.skipVerify ? "verify skipped" : undefined,
     options.ignoreIdMismatch ? "ID mismatch ignored" : undefined,
     options.skipIdRead ? "ID read skipped" : undefined,
-    options.allowUnsupportedPinCheck ? "unsupported pin check allowed" : undefined,
   ].filter((item): item is string => item !== undefined);
 }

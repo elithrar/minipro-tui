@@ -420,7 +420,6 @@ Normal advanced options:
 - Pulse delay: `--pulse <value>`.
 - SPI speed for supported devices: `--speed <value>`.
 - Disable protection before programming: `--unprotect`.
-- Enable protection after programming: `--protect`.
 - ICSP with VCC: `--icsp_vcc`.
 - ICSP without VCC: `--icsp_no_vcc`.
 

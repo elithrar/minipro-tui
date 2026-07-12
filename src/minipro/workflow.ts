@@ -91,7 +91,7 @@ export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput):
   const load = input.readFileBytes ?? readFile;
   const originalBytes = input.confirmedBytes;
   const originalSha256 = input.confirmedSha256 ?? sha256Bytes(originalBytes);
-  const workflowOptions: AdvancedOptions = { ...advanced, fileFormat: undefined };
+  const workflowOptions: AdvancedOptions = { ...advanced, fileFormat: undefined, unprotect: true };
   const backupDestinationSnapshot = input.backupDestinationSnapshot;
 
   if (input.backupFile && !backupDestinationSnapshot) return { ok: false, message: "Capture the backup destination before confirmation.", steps: [], originalSha256 };
@@ -143,9 +143,10 @@ export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput):
   }
 
   const pin = await runStep(steps, input.runCommand, "pin/contact check", buildPinCheckArgs(chip, workflowOptions));
-  if (failed(pin)) return finish(fail("pin/contact check", pin, steps, originalSha256));
-  if (isPinCheckUnsupported(commandText(pin)) && !advanced.allowUnsupportedPinCheck) {
-    return finish({ ok: false, message: "Pin/contact check is not supported for this programmer and chip. Enable the explicit override only after manually checking placement and contact.", steps, originalSha256 });
+  const pinCheckUnsupported = !pin.aborted && isPinCheckUnsupported(commandText(pin));
+  if (failed(pin) && !pinCheckUnsupported) return finish(fail("pin/contact check", pin, steps, originalSha256));
+  if (pinCheckUnsupported) {
+    input.onLog?.("Pin/contact check is not supported for this programmer and chip; continuing without it.");
   }
 
   if (input.backupFile) {
@@ -176,7 +177,7 @@ export async function runDefaultWriteWorkflow(input: DefaultWriteWorkflowInput):
   const blank = await runStep(steps, input.runCommand, "blank check", buildBlankCheckArgs(chip, workflowOptions));
   if (failed(blank)) return finish(fail("blank check", blank, steps, originalSha256));
 
-  const write = await runStep(steps, input.runCommand, "write", buildWriteArgs(chip, confirmedWritePath, { ...workflowOptions, skipErase: true, skipVerify: true }));
+  const write = await runStep(steps, input.runCommand, "write", buildWriteArgs(chip, confirmedWritePath, workflowOptions));
   if (failed(write)) return finish(fail("write", write, steps, originalSha256));
 
   if (!advanced.skipVerify) {

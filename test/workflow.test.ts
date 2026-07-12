@@ -43,7 +43,7 @@ test("default flow includes pin check, erase, blank check, write, verify, and re
     ["-p", "AT28C64B", "-z"],
     ["-p", "AT28C64B", "-E"],
     ["-p", "AT28C64B", "-b"],
-    ["-p", "AT28C64B", "-w", writePath, "--skip_erase", "--skip_verify"],
+    ["-p", "AT28C64B", "-w", writePath, "--unprotect"],
     ["-p", "AT28C64B", "-m", writePath],
     ["-p", "AT28C64B", "-r", result.readbackPath, "-c", "code"],
   ]);
@@ -119,25 +119,48 @@ test("workflow stops after a failed step", async () => {
   expect(calls).toHaveLength(3);
 });
 
-test("write flow blocks when a successful pin command reports unsupported", async () => {
+test("write flow continues when the programmer reports that pin checks are unsupported", async () => {
   const calls: string[][] = [];
+  const logs: string[] = [];
+  const bytes = new Uint8Array([1, 2, 3, 4]);
   const result = await runDefaultWriteWorkflow({
     file: fileEntry("image.bin", 4),
     chip: "AT28C64B",
     chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
     programmerKind: "t48",
     confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
+    confirmedBytes: bytes,
     runCommand: async (args) => {
       calls.push(args);
       if (args[0] === "-k") return ok(args, "T48");
       if (args.includes("-z")) return ok(args, "Pin test is not supported");
       return ok(args);
     },
+    readFileBytes: async () => bytes,
+    onLog: (line) => logs.push(line),
   });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("Pin/contact check is not supported");
-  expect(calls).toHaveLength(3);
+  expect(result.ok).toBe(true);
+  expect(logs).toContain("Pin/contact check is not supported for this programmer and chip; continuing without it.");
+  expect(calls).toHaveLength(8);
+});
+
+test("write flow also continues if an unsupported pin check exits nonzero", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const result = await runDefaultWriteWorkflow({
+    file: fileEntry("image.bin", 4),
+    chip: "AT28C64B",
+    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
+    programmerKind: "t48",
+    confirmed: true,
+    confirmedBytes: bytes,
+    runCommand: async (args) => {
+      if (args[0] === "-k") return ok(args, "T48");
+      if (args.includes("-z")) return { ...ok(args), exitCode: 1, stderr: "Pin test is not supported." };
+      return ok(args);
+    },
+    readFileBytes: async () => bytes,
+  });
+  expect(result.ok).toBe(true);
 });
 
 test("write flow rejects a different connected programmer before chip actions", async () => {

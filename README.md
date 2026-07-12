@@ -59,14 +59,14 @@ minipro -q <programmer> -d <chip>
 minipro -p <chip> -z
 minipro -p <chip> -E
 minipro -p <chip> -b
-minipro -p <chip> -w <confirmed-temp-file> --skip_erase --skip_verify
+minipro -p <chip> -w <confirmed-temp-file> --unprotect
 minipro -p <chip> -m <file>
 minipro -p <chip> -r <temp-readback-file> -c code
 ```
 
-The explicit erase, blank check, and verify happen around write, so the write command suppresses its redundant automatic erase and verify. The app freezes the confirmed bytes, then compares the selected image and readback byte-for-byte and shows SHA-256 summaries in the log. Intel HEX and S-record images are checksum-validated and normalized to raw bytes before size checks and hardware actions.
+The write command disables supported software write protection and retains Minipro's normal erase and verify behavior in addition to the workflow's explicit checks. The app never enables chip protection. It freezes the confirmed bytes, then compares the selected image and readback byte-for-byte and shows SHA-256 summaries in the log. Intel HEX and S-record images are checksum-validated and normalized to raw bytes before size checks and hardware actions.
 
-Pin/contact checks that the programmer reports as unsupported block writes by default. Advanced Controls provides an explicit, warning-backed override for devices that cannot perform the check. Raw operation images are limited to 64 MiB and structured source images to 4 MiB to keep file freezing and normalization bounded.
+Pin/contact checks run when supported; an explicit unsupported response is logged and the workflow continues. Raw operation images are limited to 64 MiB and structured source images to 4 MiB to keep file freezing and normalization bounded.
 
 Enable `Pre-write backup` under Advanced Controls to read the selected memory region to a new file before erase. The backup is hashed, synced, and committed before the workflow can continue. Existing files are never replaced by hardware reads.
 

@@ -71,7 +71,6 @@ export type AdvancedOptions = {
   pulseDelay?: string;
   spiSpeed?: string;
   unprotect?: boolean;
-  protect?: boolean;
   icspVcc?: boolean;
   icspNoVcc?: boolean;
   skipErase?: boolean;
@@ -81,5 +80,4 @@ export type AdvancedOptions = {
   skipIdRead?: boolean;
   disableReadbackCompare?: boolean;
   backupBeforeWrite?: boolean;
-  allowUnsupportedPinCheck?: boolean;
 };

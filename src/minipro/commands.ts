@@ -62,7 +62,6 @@ export function buildWriteArgs(chip: string, file: string, options: AdvancedOpti
   if (options.pulseDelay) result.push("--pulse", stripUnit(options.pulseDelay, /us$/i));
   if (options.spiSpeed) result.push("--speed", options.spiSpeed.trim());
   if (options.unprotect) result.push("--unprotect");
-  if (options.protect) result.push("--protect");
   if (options.skipErase) result.push("--skip_erase");
   if (options.skipVerify) result.push("--skip_verify");
   if (options.allowSizeMismatch) result.push("--no_size_error");
@@ -82,6 +81,7 @@ export function buildReadArgs(chip: string, outputFile: string, options: Advance
 }
 
 export function buildDefaultWritePreview(chip: string, file: string, kind: ProgrammerKind, options: AdvancedOptions = {}, backupFile?: string): string[][] {
+  const writeOptions = { ...options, unprotect: true };
   const commands = [
     buildDetectProgrammerArgs(),
     buildChipInfoArgs(kind, chip),
@@ -90,7 +90,7 @@ export function buildDefaultWritePreview(chip: string, file: string, kind: Progr
 
   if (backupFile) commands.push(buildReadArgs(chip, backupFile, options));
   if (!options.skipErase) commands.push(buildEraseArgs(chip, options));
-  commands.push(buildBlankCheckArgs(chip, options), buildWriteArgs(chip, file, { ...options, skipErase: true, skipVerify: true }));
+  commands.push(buildBlankCheckArgs(chip, options), buildWriteArgs(chip, file, writeOptions));
 
   if (!options.skipVerify) commands.push(buildVerifyArgs(chip, file, options));
   if (!options.disableReadbackCompare) commands.push(buildReadArgs(chip, "<temp-readback-file>", options));
