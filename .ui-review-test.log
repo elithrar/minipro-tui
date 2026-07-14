@@ -1,0 +1,143 @@
+bun test v1.3.14 (0d9b296a)
+
+::group::test/state.test.ts:
+(pass) persists and restores preferences and recents [7.62ms]
+(pass) rejects malformed or unsupported persisted state [0.29ms]
+
+::endgroup::
+
+::group::test/image.test.ts:
+(pass) normalizes Intel HEX data and fills address gaps [1.25ms]
+(pass) preserves nonzero structured-image addresses [0.12ms]
+(pass) normalizes S-record data [0.43ms]
+(pass) rejects malformed structured images instead of treating text as bytes [0.50ms]
+
+::endgroup::
+
+::group::test/minipro-parse.test.ts:
+(pass) parses supported programmer list [0.48ms]
+(pass) parses no-programmer state [0.23ms]
+(pass) treats missing minipro binary as disconnected [0.05ms]
+(pass) parses chip search results exactly [0.18ms]
+(pass) parses chip info fields and preserves raw output [0.36ms]
+(pass) parses chip programming voltage metadata [0.07ms]
+(pass) keeps unknown chip info lines nonfatal [0.03ms]
+(pass) parses the leading code-memory region from compound descriptions [0.07ms]
+
+::endgroup::
+
+::group::test/tui-render.test.ts:
+(pass) status line shows disconnected programmer state [0.09ms]
+(pass) status line stays compact [0.07ms]
+(pass) status summary shows matching chip and image as ready [0.41ms]
+(pass) status summary styles enabled and dangerous disabled stages [0.38ms]
+(pass) status summary blocks size mismatch by default [0.08ms]
+(pass) status defers structured image sizing until normalization [0.10ms]
+(pass) status summary exposes dangerous overrides [0.14ms]
+(pass) status summary stays within the available panel width [0.17ms]
+(pass) chip labels include useful database metadata [0.34ms]
+(pass) log formatting strips terminal escape sequences and bolds commands [0.19ms]
+
+::endgroup::
+
+::group::test/workflow.test.ts:
+(pass) default flow includes pin check, erase, blank check, write, verify, and readback compare [2.76ms]
+(pass) default flow blocks on missing file [0.10ms]
+(pass) default flow blocks on missing chip [0.07ms]
+(pass) default flow blocks on known size mismatch [0.09ms]
+(pass) default flow allows size mismatch only when explicit override is enabled [0.74ms]
+(pass) workflow stops after a failed step [0.80ms]
+(pass) write flow continues when the programmer reports that pin checks are unsupported [0.72ms]
+(pass) write flow also continues if an unsupported pin check exits nonzero [0.66ms]
+(pass) write flow rejects a different connected programmer before chip actions [0.53ms]
+(pass) write flow rejects an unrecognized connected programmer [0.52ms]
+(pass) write flow revalidates live chip size before destructive steps [0.45ms]
+(pass) default flow writes confirmed bytes even if the source path changes [0.92ms]
+(pass) optional backup completes before erase and is preserved [8.79ms]
+(pass) read workflow reads to a file and reports checksum [2.63ms]
+(pass) read workflow requires confirmation [0.10ms]
+(pass) reads refuse to replace an existing destination [0.49ms]
+(pass) read refuses to replace a destination created after confirmation [2.05ms]
+(pass) compare workflow reports matched hashes [0.81ms]
+(pass) compare workflow reports mismatched hashes [0.38ms]
+
+::endgroup::
+
+::group::test/dialogs.test.ts:
+(pass) confirmation renders a bordered modal with safe, keyboard-driven actions [165.37ms]
+(pass) long message content scrolls and escape restores control [63.41ms]
+(pass) open dialogs stay inside the terminal after resize [82.13ms]
+109 |   setup.resize(40, 14);
+110 |   await setup.flush();
+111 |   const frame = setup.captureCharFrame();
+112 |   expect(frame).toContain("Cancel");
+113 |   expect(frame).toContain("Write");
+114 |   expect(frame).toContain("N/Esc");
+                      ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "N/Esc"
+Received: "                                        \n ╭─ Write Chip ───────────────────────╮ \n │                                    │ \n │ command 0                        ▀ │ \n │                                    │ \n │              ┏━━━━━━━━┓ ╭────────╮ │ \n │              ┃ Cancel ┃ │ Write  │ │ \n │              ┗━━━━━━━━┛ ╰────────╯ │ \n │                                    │ \n │  ←/→  choose   Enter  activate     │ \n │                                    │ \n ╰────────────────────────────────────╯ \n                                        \n                                        \n"
+
+      at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/dialogs.test.ts:114:17)
+
+::error file=test/dialogs.test.ts,line=114,col=17,title=error: expect(received).toContain(expected)::Expected to contain: "N/Esc"%0A \n                                        \n                                        \n"%0A%0A      at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/dialogs.test.ts:114:17)
+(fail) confirmation controls remain visible after shrinking a long preview [59.57ms]
+
+::endgroup::
+
+::group::test/app-interaction.test.ts:
+28 |   expect(desktop).toContain("Actions / Log");
+29 |   expect(desktop).toContain("Safety");
+30 |   expect(desktop).toContain("╭");
+31 |   expect(desktop).toContain("┏");
+32 |   expect(desktop).toContain("[Tab] focus");
+33 |   expect(desktop).toContain("[Enter] open");
+                       ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "[Enter] open"
+Received: "                                                                                                                        \n minipro-tui | disconnected | t48 | AT28C64B | no file | idle | Focus Files                                             \n                                                                                                                        \n ┏━ Files . ━━━━━━━━━━━━━━━━━━━━━━━━━━━┓ ╭─ Chip Search ──────────────────────╮ ╭─ Status ────────────────────────────╮ \n ┃                                     ┃ │                                    │ │                                     │ \n ┃ Find files or folders               ┃ │ AT28C64B                             │ Fit      WAIT select file+chip      │ \n ┃                                     ┃ │                                    │ │ Backup   OFF                        │ \n ┃    ../                              ┃ │  > AT28C64B (default, 28 pin DIP)  │ │ Erase    ON                         │ \n ┃  directory                        █ ┃ │    M27C64A@DIP28 (28 pin DIP)    █ │ │ Blank    ON                         │ \n ┃    .git/                            ┃ │    AT28C64B(Non-Standard) (28 pin  │ │ Write    ON                         │ \n ┃  directory                          ┃ │    AT28C64B(Non-Standard)@SOIC28 ( │ │ Verify   ON                         │ \n ┃    .github/                         ┃ │    AT28C64B(Non-Standard)@PLCC32 ( │ │ Compare  ON                         │ \n ┃  directory                          ┃ │    AT28C64B@SOIC28 (28 pin DIP)    │ │ Device   disconnected / t48         │ \n ┃    fixtures/                        ┃ │    AT28C64B@PLCC32 (28 pin DIP)    │ │ Chip     AT28C64B / 8.0 KiB / DIP28 │ \n ┃  directory                          ┃ │    CAT28C64B (28 pin DIP)          │ │ Image    none                       │ \n ┃                                     ┃ │    CAT28C64B@SOIC28 (28 pin DIP)   │ │ Safety   OK defaults                │ \n ┃                                     ┃ │                                    │ │                                     │ \n ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ ╰────────────────────────────────────╯ ╰─────────────────────────────────────╯ \n                                                                                                                        \n ╭─ Actions / Log ────────────────────────────────────────────────────────────────────────────────────────────────────╮ \n │                                                                                                                    │ \n │ Refreshing files and programmer status.                                                                            │ \n │ Available programmer databases: tl866a, tl866ii, t48, t56                                                          │ \n │ Searching t48 database for AT28C64B.                                                                               │ \n │ Selected chip AT28C64B.                                                                                            │ \n │                                                                                                                    │ \n │                                                                                                                    │ \n │                                                                                                                    │ \n │                                                                                                                    │ \n ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ \n [Tab] focus  [Enter] select  [F] files  [/] chips  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit          \n                                                                                                                        \n"
+
+      at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/app-interaction.test.ts:33:19)
+
+::error file=test/app-interaction.test.ts,line=33,col=19,title=error: expect(received).toContain(expected)::Expected to contain: "[Enter] open"%0A \n [Tab] focus  [Enter] select  [F] files  [/] chips  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit          \n                                                                                                                        \n"%0A%0A      at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/app-interaction.test.ts:33:19)
+(fail) switches from the desktop workbench to native compact tabs on resize [47.97ms]
+(pass) compact chip shortcut moves focus before a slow search completes [66.50ms]
+(pass) quit aborts and joins an in-flight database search [44.37ms]
+
+::endgroup::
+
+::group::test/files.test.ts:
+(pass) file scanner excludes directories and shows programming files by default [1.50ms]
+(pass) file tree scanner includes directories and filters files by default [1.07ms]
+(pass) file scanner can include all files [1.30ms]
+(pass) file scanner orders files by newest modified time first [1.33ms]
+(pass) hash cache invalidates when file size or mtime changes [1.04ms]
+(pass) hashing rejects stale file metadata [0.54ms]
+(pass) short SHA output is stable [0.03ms]
+(pass) scanner does not hash files larger than the operation limit [0.50ms]
+
+::endgroup::
+
+::group::test/commands.test.ts:
+(pass) builds argv arrays for minipro commands [0.12ms]
+(pass) passes chip names with package characters as one argv entry [0.02ms]
+(pass) keeps user-requested dangerous overrides absent from default flow [0.17ms]
+(pass) write preview reflects advanced options [0.11ms]
+(pass) write preview places an optional backup before erase [0.05ms]
+(pass) scopes advanced options to minipro modes that support them [0.17ms]
+(pass) streams minipro output as complete log lines [27.21ms]
+(pass) cancels a running minipro process and reports the abort [1.38ms]
+(pass) force-kills a process tree that exceeds the output limit [46.96ms]
+
+::endgroup::
+
+2 tests failed:
+(fail) confirmation controls remain visible after shrinking a long preview [59.57ms]
+(fail) switches from the desktop workbench to native compact tabs on resize [47.97ms]
+
+ 65 pass
+ 2 fail
+ 206 expect() calls
+Ran 67 tests across 9 files. [913.00ms]

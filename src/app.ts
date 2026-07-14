@@ -958,15 +958,27 @@ export class MiniproTuiApp {
 
   private async help(): Promise<void> {
     await this.dialogs.message(
-      "Help",
+      "Keyboard Reference",
       [
-        footerText(),
+        "Navigation",
+        "  Tab        Move focus",
+        "  Enter      Activate the selected item",
+        "  F          Focus file search",
+        "  /          Focus chip search",
+        "  L          Focus the action log",
         "",
-        "Defaults: T48 programmer database and AT28C64B chip query.",
-        "Status: persistent operator summary for programmer, chip, image, size fit, safety options, and next action.",
-        "Write path: check, erase, blank check, write, verify, readback compare, with confirmation.",
-        "Read path: Shift+R, edit filename, choose Read or Cancel, then checksum is logged.",
-        "Compare path: m, compare the selected local file to a temporary chip readback, then show both hashes.",
+        "Actions",
+        "  R          Refresh files and programmer status",
+        "  Shift+R    Read the selected chip",
+        "  W          Write the selected image",
+        "  M          Compare chip contents with the selected image",
+        "  I          Show chip details",
+        "  A          Open advanced controls",
+        "",
+        "Safety",
+        "  Confirmations default to Cancel. Use Left/Right or Tab, then Enter.",
+        "  Erase and write cannot be cancelled after those steps begin.",
+        "  Defaults: T48 database and AT28C64B chip query.",
       ].join("\n"),
     );
   }
@@ -1152,7 +1164,7 @@ export class MiniproTuiApp {
       showAllFiles: this.showAllFiles,
     }, { width: statusSummaryWidth });
     this.components.logText.content = formatLogContent(this.logLines.slice(-500));
-    this.footerLine = this.activeCommandCancellable ? `esc cancel | ${footerText()}` : footerText();
+    this.footerLine = this.activeCommandCancellable ? `[Esc] cancel  ${footerText()}` : footerText();
     this.renderer?.root.requestRender();
   }
 
@@ -1269,9 +1281,9 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
     title: ` ${title} `,
     titleColor: PRIMARY,
     border: true,
-    borderStyle: "single",
+    borderStyle: "rounded",
     borderColor: BORDER,
-    focusedBorderColor: BORDER_ACTIVE,
+    focusedBorderColor: PRIMARY,
     backgroundColor: PANEL,
     padding: 1,
     flexGrow: 1,
@@ -1308,12 +1320,13 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
     descriptionColor: MUTED,
     selectedDescriptionColor: SELECTED_TEXT,
     showScrollIndicator: true,
+    showSelectionIndicator: false,
     wrapSelection: true,
   };
 }
 
 function footerText(): string {
-  return "q quit | tab focus | enter/space select | f files | / chips | i info | l log | r refresh | w write | m compare | R read | ? help";
+  return "[Tab] focus  [Enter] select  [F] files  [/] chips  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit";
 }
 
 function formatWriteActionSummary(options: AdvancedOptions, backup: boolean): string {
@@ -1479,9 +1492,21 @@ function formatDirectoryLabel(directory: string): string {
 }
 
 function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): void {
-  panel.title = focused ? ` > ${title} ` : ` ${title} `;
+  panel.title = ` ${title} `;
   panel.titleColor = focused ? TEXT : PRIMARY;
+  panel.borderStyle = focused ? "heavy" : "rounded";
   panel.borderColor = focused ? PRIMARY : BORDER;
+  panel.bottomTitle = focused ? panelShortcut(panel.id) : undefined;
+  panel.bottomTitleAlignment = "right";
+}
+
+function panelShortcut(id: string): string | undefined {
+  switch (id) {
+    case "files-panel": return " [Enter] open  [Space] choose  [Backspace] up ";
+    case "chip-panel": return " [Enter] choose  [/] search  [I] details ";
+    case "log-panel": return " [↑/↓] scroll  [L] focus ";
+    default: return undefined;
+  }
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {

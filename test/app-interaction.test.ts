@@ -27,6 +27,10 @@ test("switches from the desktop workbench to native compact tabs on resize", asy
   expect(desktop).toContain("Chip Search");
   expect(desktop).toContain("Actions / Log");
   expect(desktop).toContain("Safety");
+  expect(desktop).toContain("╭");
+  expect(desktop).toContain("┏");
+  expect(desktop).toContain("[Tab] focus");
+  expect(desktop).toContain("[Enter] open");
 
   setup.mockInput.pressKey("f");
   await setup.flush();

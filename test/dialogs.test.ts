@@ -14,7 +14,7 @@ const theme = {
   muted: "#808080",
 };
 
-test("confirm defaults to cancel and accepts canonical keyboard navigation", async () => {
+test("confirmation renders a bordered modal with safe, keyboard-driven actions", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24 });
   let opened = 0;
   let closed = 0;
@@ -27,7 +27,12 @@ test("confirm defaults to cancel and accepts canonical keyboard navigation", asy
 
   const cancelled = dialogs.confirm("Write Chip", "Review the operation", "Write");
   await setup.flush();
-  expect(setup.captureCharFrame()).toContain("[cancel]");
+  const initial = setup.captureCharFrame();
+  expect(initial).toContain("╭");
+  expect(initial).toContain("Write Chip");
+  expect(initial).toContain("Cancel");
+  expect(initial).toContain("Write");
+  expect(initial).toContain("N/Esc");
   setup.mockInput.pressEnter();
   expect(await cancelled).toBe(false);
 
@@ -36,8 +41,13 @@ test("confirm defaults to cancel and accepts canonical keyboard navigation", asy
   setup.mockInput.pressArrow("right");
   setup.mockInput.pressEnter();
   expect(await confirmed).toBe(true);
-  expect(opened).toBe(2);
-  expect(closed).toBe(2);
+
+  const confirmedByShortcut = dialogs.confirm("Write Chip", "Review the operation", "Write");
+  await setup.flush();
+  setup.mockInput.pressKey("y");
+  expect(await confirmedByShortcut).toBe(true);
+  expect(opened).toBe(3);
+  expect(closed).toBe(3);
   setup.renderer.destroy();
 });
 
@@ -80,7 +90,7 @@ test("open dialogs stay inside the terminal after resize", async () => {
   const modal = setup.renderer.root.getChildren().find((child) => child.id.startsWith("modal-") && !child.id.startsWith("modal-backdrop"));
   expect(modal?.width).toBeLessThanOrEqual(30);
   expect(modal?.height).toBeLessThanOrEqual(9);
-  expect(setup.captureCharFrame()).toContain("enter/esc close");
+  expect(setup.captureCharFrame()).toContain("Enter/Esc");
   setup.mockInput.pressEscape();
   await message;
   setup.renderer.destroy();
@@ -99,8 +109,9 @@ test("confirmation controls remain visible after shrinking a long preview", asyn
   setup.resize(40, 14);
   await setup.flush();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("[cancel]");
-  expect(frame).toContain("esc cancel");
+  expect(frame).toContain("Cancel");
+  expect(frame).toContain("Write");
+  expect(frame).toContain("N/Esc");
   setup.mockInput.pressEscape();
   expect(await confirmation).toBe(false);
   setup.renderer.destroy();
