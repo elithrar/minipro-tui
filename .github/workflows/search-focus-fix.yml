@@ -38,23 +38,48 @@ jobs:
                   raise RuntimeError(f"{label}: expected 1 match, found {count}")
               source = source.replace(old, new, 1)
 
-          handler = (
-              '      onKeyDown: (key) => {\n'
-              '        if (key.name === "escape" || key.name === "esc") {\n'
-              '          consumeKey(key);\n'
-              '          this.exitSearchInput();\n'
-              '        }\n'
-              '      },\n'
+          key_handler = (
+              '    fileQuery.onKeyDown = (key) => {\n'
+              '      if (key.name === "escape" || key.name === "esc") {\n'
+              '        consumeKey(key);\n'
+              '        this.exitSearchInput();\n'
+              '      }\n'
+              '    };\n'
           )
           replace_once(
-              '      cursorColor: PRIMARY,\n      marginBottom: 1,\n    });\n    const files =',
-              '      cursorColor: PRIMARY,\n' + handler + '      marginBottom: 1,\n    });\n    const files =',
+              '    });\n    const files = new SelectRenderable',
+              '    });\n' + key_handler + '    const files = new SelectRenderable',
               'file search key handler',
           )
+
+          chip_handler = (
+              '    chipQuery.onKeyDown = (key) => {\n'
+              '      if (key.name === "escape" || key.name === "esc") {\n'
+              '        consumeKey(key);\n'
+              '        this.exitSearchInput();\n'
+              '      }\n'
+              '    };\n'
+          )
           replace_once(
-              '      cursorColor: PRIMARY,\n      marginBottom: 1,\n    });\n    const chips =',
-              '      cursorColor: PRIMARY,\n' + handler + '      marginBottom: 1,\n    });\n    const chips =',
+              '    });\n    const chips = new SelectRenderable',
+              '    });\n' + chip_handler + '    const chips = new SelectRenderable',
               'EPROM search key handler',
+          )
+
+          replace_once(
+              '    if (components.fileQuery.focused) {\n      components.files.focus();',
+              '    if (components.fileQuery.focused) {\n      components.fileQuery.blur();\n      components.files.focus();',
+              'file search blur',
+          )
+          replace_once(
+              '      components.chipQuery.value = this.chipQuery;\n      components.chips.focus();',
+              '      components.chipQuery.value = this.chipQuery;\n      components.chipQuery.blur();\n      components.chips.focus();',
+              'EPROM search blur',
+          )
+          replace_once(
+              '    if (activeSearch === "chips") components.chipQuery.value = this.chipQuery;\n    if (pointInRenderable(components.filesPanel, x, y))',
+              '    if (activeSearch === "files") components.fileQuery.blur();\n    else {\n      components.chipQuery.value = this.chipQuery;\n      components.chipQuery.blur();\n    }\n    if (pointInRenderable(components.filesPanel, x, y))',
+              'pointer search blur',
           )
           path.write_text(source)
           PY
