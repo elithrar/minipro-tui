@@ -93,6 +93,15 @@ jobs:
               'Escape key helper',
           )
           path.write_text(source)
+
+          test_path = Path("test/app-interaction.test.ts")
+          test_source = test_path.read_text()
+          old = '  setup.mockInput.pressEscape();\n  await setup.flush();'
+          count = test_source.count(old)
+          if count != 2:
+              raise RuntimeError(f"Escape test waits: expected 2 matches, found {count}")
+          test_source = test_source.replace(old, '  setup.mockInput.pressEscape();\n  await Bun.sleep(25);\n  await setup.flush();')
+          test_path.write_text(test_source)
           PY
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
