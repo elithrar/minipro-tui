@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   apply-and-verify:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,27 +24,28 @@ jobs:
           bun-version: "1.3.14"
       - name: Apply focus interaction changes
         run: |
+          python3 scripts/apply-search-focus-fix.py
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - name: Test and capture failure
+        run: |
           set +e
-          python3 scripts/apply-search-focus-fix.py > .search-focus-error.log 2>&1
+          bun test > .search-focus-test.log 2>&1
           status=$?
-          cat .search-focus-error.log
+          cat .search-focus-test.log
           if [ "$status" -ne 0 ]; then
-            rm -f scripts/apply-search-focus-fix.py .github/workflows/search-focus-fix.yml
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "chore: capture search focus patch failure"
+            git add .search-focus-test.log
+            git commit -m "chore: capture search focus test failure"
             git push
             exit "$status"
           fi
-          rm .search-focus-error.log
-      - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit
-      - run: bun test
+          rm .search-focus-test.log
       - run: bun run build
       - name: Commit verified changes
         run: |
-          rm scripts/apply-search-focus-fix.py .github/workflows/search-focus-fix.yml
+          rm -f .search-focus-error.log .search-focus-test.log scripts/apply-search-focus-fix.py .github/workflows/search-focus-fix.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
