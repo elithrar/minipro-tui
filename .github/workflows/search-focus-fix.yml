@@ -25,6 +25,39 @@ jobs:
       - name: Apply focus interaction changes
         run: |
           python3 scripts/apply-search-focus-fix.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/app.ts")
+          source = path.read_text()
+
+          def replace_once(old: str, new: str, label: str) -> None:
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              source = source.replace(old, new, 1)
+
+          handler = (
+              '      onKeyDown: (key) => {\n'
+              '        if (key.name === "escape" || key.name === "esc") {\n'
+              '          consumeKey(key);\n'
+              '          this.exitSearchInput();\n'
+              '        }\n'
+              '      },\n'
+          )
+          replace_once(
+              '      cursorColor: PRIMARY,\n      marginBottom: 1,\n    });\n    const files =',
+              '      cursorColor: PRIMARY,\n' + handler + '      marginBottom: 1,\n    });\n    const files =',
+              'file search key handler',
+          )
+          replace_once(
+              '      cursorColor: PRIMARY,\n      marginBottom: 1,\n    });\n    const chips =',
+              '      cursorColor: PRIMARY,\n' + handler + '      marginBottom: 1,\n    });\n    const chips =',
+              'EPROM search key handler',
+          )
+          path.write_text(source)
+          PY
       - run: bun install --frozen-lockfile
       - run: bunx tsc --noEmit
       - name: Test and capture failure
