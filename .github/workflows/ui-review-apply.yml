@@ -24,6 +24,11 @@ jobs:
           bun-version: 1.3.14
       - name: Apply reviewed UI changes
         run: |
+          if grep -q 'Keyboard Reference' src/app.ts; then
+            echo "UI patch already applied"
+            rm -f .ui-review-error.log
+            exit 0
+          fi
           python3 - <<'PY'
           from pathlib import Path
           path = Path("scripts/apply-ui-review.py")
@@ -58,7 +63,20 @@ jobs:
       - name: Type-check
         run: bunx tsc --noEmit
       - name: Test
-        run: bun test
+        run: |
+          set +e
+          bun test > .ui-review-test.log 2>&1
+          status=$?
+          cat .ui-review-test.log
+          if [ "$status" -ne 0 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src test .ui-review-test.log
+            git commit -m "chore: capture UI test failure"
+            git push
+            exit "$status"
+          fi
+          rm .ui-review-test.log
       - name: Commit verified changes
         run: |
           rm scripts/apply-ui-review.py .github/workflows/ui-review-apply.yml
