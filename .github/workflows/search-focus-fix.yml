@@ -38,9 +38,15 @@ jobs:
                   raise RuntimeError(f"{label}: expected 1 match, found {count}")
               source = source.replace(old, new, 1)
 
+          replace_once(
+              '        if (key.name === "escape" || key.name === "esc") {\n          consumeKey(key);\n          this.exitSearchInput();',
+              '        if (isEscapeKey(key)) {\n          consumeKey(key);\n          this.exitSearchInput();',
+              'global Escape handling',
+          )
+
           key_handler = (
               '    fileQuery.onKeyDown = (key) => {\n'
-              '      if (key.name === "escape" || key.name === "esc") {\n'
+              '      if (isEscapeKey(key)) {\n'
               '        consumeKey(key);\n'
               '        this.exitSearchInput();\n'
               '      }\n'
@@ -54,7 +60,7 @@ jobs:
 
           chip_handler = (
               '    chipQuery.onKeyDown = (key) => {\n'
-              '      if (key.name === "escape" || key.name === "esc") {\n'
+              '      if (isEscapeKey(key)) {\n'
               '        consumeKey(key);\n'
               '        this.exitSearchInput();\n'
               '      }\n'
@@ -80,6 +86,11 @@ jobs:
               '    if (activeSearch === "chips") components.chipQuery.value = this.chipQuery;\n    if (pointInRenderable(components.filesPanel, x, y))',
               '    if (activeSearch === "files") components.fileQuery.blur();\n    else {\n      components.chipQuery.value = this.chipQuery;\n      components.chipQuery.blur();\n    }\n    if (pointInRenderable(components.filesPanel, x, y))',
               'pointer search blur',
+          )
+          replace_once(
+              'function consumeKey(key: KeyEvent): void {',
+              'function isEscapeKey(key: KeyEvent): boolean {\n  return key.name === "escape" || key.name === "esc" || key.raw === "\\x1b" || key.sequence === "\\x1b";\n}\n\nfunction consumeKey(key: KeyEvent): void {',
+              'Escape key helper',
           )
           path.write_text(source)
           PY
