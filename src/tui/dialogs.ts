@@ -7,6 +7,8 @@ import {
   ScrollBoxRenderable,
   SelectRenderable,
   SelectRenderableEvents,
+  StyledText,
+  TextAttributes,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -31,6 +33,9 @@ export type DialogControllerOptions = {
   onClose: () => void;
 };
 
+type ConfirmChoice = "cancel" | "confirm";
+type Shortcut = { key: string; label: string };
+
 export class DialogController {
   private nextModalId = 0;
 
@@ -40,20 +45,42 @@ export class DialogController {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
     const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 7));
-    const modal = this.modalBox(renderer, textHeight + 6);
-    this.addHeader(renderer, modal, title);
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 11));
+    const modal = this.modalBox(renderer, title, textHeight + 11);
     const body = this.scrollableText(renderer, content, textHeight);
     body.marginBottom = 1;
     modal.add(body);
-    const buttonRow = new TextRenderable(renderer, { content: "", width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 });
+
+    const buttonRow = new BoxRenderable(renderer, {
+      id: `modal-buttons-${this.nextModalId}`,
+      width: "100%",
+      height: 3,
+      flexDirection: "row",
+      justifyContent: "flex-end",
+      backgroundColor: this.options.theme.panel,
+      columnGap: 1,
+      marginBottom: 1,
+    });
+    const cancelButton = this.button(renderer, "Cancel", Math.max(10, "Cancel".length + 4));
+    const confirmButton = this.button(renderer, confirmLabel, Math.max(10, confirmLabel.length + 4));
+    buttonRow.add(cancelButton.box);
+    buttonRow.add(confirmButton.box);
     modal.add(buttonRow);
-    modal.add(new TextRenderable(renderer, { content: "arrows choose  enter  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    modal.add(this.shortcutBar(renderer, [
+      { key: "←/→", label: "choose" },
+      { key: "Enter", label: "activate" },
+    ]));
+    modal.add(this.shortcutBar(renderer, [
+      { key: "Y", label: "confirm" },
+      { key: "N/Esc", label: "cancel" },
+    ]));
+
     const backdrop = this.backdropBox(renderer);
-    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 8, (height) => { body.height = Math.max(1, height - 8); });
+    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 11, (height) => { body.height = Math.max(1, height - 11); });
 
     return new Promise((resolve) => {
       let settled = false;
+      let active: ConfirmChoice = "cancel";
       const done = (value: boolean) => {
         if (settled) return;
         settled = true;
@@ -64,28 +91,30 @@ export class DialogController {
         this.options.onClose();
         resolve(value);
       };
-      let active: "cancel" | "confirm" = "cancel";
       const renderButtons = () => {
-        buttonRow.content = formatConfirmButtons(active, confirmLabel.toLowerCase(), modalInnerWidth(renderer));
+        this.setButtonState(cancelButton, active === "cancel");
+        this.setButtonState(confirmButton, active === "confirm");
         renderer.root.requestRender();
       };
       modal.onKeyDown = (key: KeyEvent) => {
         if (isCancelKey(key) || isKey(key, "q") || isKey(key, "n")) {
-          key.preventDefault();
-          key.stopPropagation();
+          consumeKey(key);
           done(false);
           return;
         }
-        if (isKey(key, "left")) {
-          key.preventDefault();
-          key.stopPropagation();
+        if (isKey(key, "y")) {
+          consumeKey(key);
+          done(true);
+          return;
+        }
+        if (isKey(key, "left") || (isKey(key, "tab") && active === "confirm")) {
+          consumeKey(key);
           active = "cancel";
           renderButtons();
           return;
         }
-        if (isKey(key, "right")) {
-          key.preventDefault();
-          key.stopPropagation();
+        if (isKey(key, "right") || (isKey(key, "tab") && active === "cancel")) {
+          consumeKey(key);
           active = "confirm";
           renderButtons();
           return;
@@ -99,8 +128,7 @@ export class DialogController {
           return;
         }
         if (isSubmitKey(key)) {
-          key.preventDefault();
-          key.stopPropagation();
+          consumeKey(key);
           done(active === "confirm");
         }
       };
@@ -113,8 +141,7 @@ export class DialogController {
   async filename(title: string, initialValue: string): Promise<string | undefined> {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
-    const modal = this.modalBox(renderer, 8);
-    this.addHeader(renderer, modal, title);
+    const modal = this.modalBox(renderer, title, 9);
     modal.add(new TextRenderable(renderer, { content: "Output filename", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
     const input = new InputRenderable(renderer, {
       value: initialValue,
@@ -127,9 +154,12 @@ export class DialogController {
       marginBottom: 1,
     });
     modal.add(input);
-    modal.add(new TextRenderable(renderer, { content: "enter read  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel }));
+    modal.add(this.shortcutBar(renderer, [
+      { key: "Enter", label: "accept" },
+      { key: "Esc", label: "cancel" },
+    ]));
     const backdrop = this.backdropBox(renderer);
-    const unmount = this.mountModal(renderer, modal, backdrop, 8);
+    const unmount = this.mountModal(renderer, modal, backdrop, 9);
 
     return new Promise((resolve) => {
       let settled = false;
@@ -148,8 +178,7 @@ export class DialogController {
       input.on(InputRenderableEvents.ENTER, submit);
       input.onKeyDown = (key: KeyEvent) => {
         if (isCancelKey(key)) {
-          key.preventDefault();
-          key.stopPropagation();
+          consumeKey(key);
           done(undefined);
         }
       };
@@ -166,18 +195,21 @@ export class DialogController {
     this.options.onOpen();
     const rowsPerOption = options.some((option) => option.description) ? 2 : 1;
     const desiredSelectHeight = Math.max(4, options.length * rowsPerOption);
-    const modalHeight = clamp(desiredSelectHeight + 5, 8, maxModalHeight(renderer));
-    const modal = this.modalBox(renderer, modalHeight);
-    this.addHeader(renderer, modal, title);
+    const modalHeight = clamp(desiredSelectHeight + 7, 10, maxModalHeight(renderer));
+    const modal = this.modalBox(renderer, title, modalHeight);
     const select = new SelectRenderable(renderer, {
-      ...this.selectOptions("modal-select", Math.max(4, modalHeight - 5)),
+      ...this.selectOptions("modal-select", Math.max(4, modalHeight - 7)),
       options,
       selectedIndex: Math.max(0, selectedIndex),
     });
     modal.add(select);
-    modal.add(new TextRenderable(renderer, { content: "enter select  arrows move  esc cancel", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    modal.add(this.shortcutBar(renderer, [
+      { key: "↑/↓", label: "move" },
+      { key: "Enter", label: "select" },
+      { key: "Esc", label: "cancel" },
+    ], 1));
     const backdrop = this.backdropBox(renderer);
-    const unmount = this.mountModal(renderer, modal, backdrop, modalHeight, (height) => { select.height = Math.max(1, height - 6); });
+    const unmount = this.mountModal(renderer, modal, backdrop, modalHeight, (height) => { select.height = Math.max(1, height - 7); });
 
     return new Promise((resolve) => {
       let settled = false;
@@ -196,8 +228,7 @@ export class DialogController {
       select.on(SelectRenderableEvents.ITEM_SELECTED, selected);
       select.onKeyDown = (key: KeyEvent) => {
         if (isCancelKey(key) || isKey(key, "q")) {
-          key.preventDefault();
-          key.stopPropagation();
+          consumeKey(key);
           done(undefined);
         }
       };
@@ -209,13 +240,15 @@ export class DialogController {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
     const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 5));
-    const modal = this.modalBox(renderer, textHeight + 4);
-    this.addHeader(renderer, modal, title);
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 7));
+    const modal = this.modalBox(renderer, title, textHeight + 7);
     const body = this.scrollableText(renderer, content, textHeight);
     body.marginBottom = 1;
     modal.add(body);
-    modal.add(new TextRenderable(renderer, { content: "enter/esc close", width: "100%", height: 1, fg: this.options.theme.muted, bg: this.options.theme.panel, marginTop: 1 }));
+    modal.add(this.shortcutBar(renderer, [
+      { key: "↑/↓", label: "scroll" },
+      { key: "Enter/Esc", label: "close" },
+    ]));
     const backdrop = this.backdropBox(renderer);
     const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 7, (height) => { body.height = Math.max(1, height - 7); });
 
@@ -233,8 +266,7 @@ export class DialogController {
       };
       body.onKeyDown = (key: KeyEvent) => {
         if (isCancelKey(key) || isKey(key, "q") || isSubmitKey(key)) {
-          key.preventDefault();
-          key.stopPropagation();
+          consumeKey(key);
           done();
         }
       };
@@ -242,18 +274,24 @@ export class DialogController {
     });
   }
 
-  private modalBox(renderer: CliRenderer, height: number): BoxRenderable {
-    const modalHeight = clamp(height, 6, maxModalHeight(renderer));
+  private modalBox(renderer: CliRenderer, title: string, height: number): BoxRenderable {
+    const modalHeight = clamp(height, 7, maxModalHeight(renderer));
     const width = modalWidth(renderer);
     return new BoxRenderable(renderer, {
       id: `modal-${++this.nextModalId}`,
       position: "absolute",
       zIndex: 100,
       top: Math.max(0, Math.floor((renderer.height - modalHeight) / 2)),
-      left: Math.max(1, Math.floor((renderer.width - width) / 2)),
+      left: Math.max(0, Math.floor((renderer.width - width) / 2)),
       width,
       height: modalHeight,
-      border: false,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: this.options.theme.borderActive,
+      focusedBorderColor: this.options.theme.primary,
+      title: ` ${title} `,
+      titleColor: this.options.theme.primary,
+      titleAlignment: "left",
       backgroundColor: this.options.theme.panel,
       padding: 1,
       flexDirection: "column",
@@ -292,7 +330,7 @@ export class DialogController {
     scroll.add(new TextRenderable(renderer, {
       content,
       width: "100%",
-      fg: this.options.theme.muted,
+      fg: this.options.theme.text,
       bg: this.options.theme.panel,
       wrapMode: "word",
     }));
@@ -308,17 +346,48 @@ export class DialogController {
       left: 0,
       width: renderer.width,
       height: renderer.height,
-      backgroundColor: RGBA.fromInts(0, 0, 0, 150),
+      backgroundColor: RGBA.fromInts(0, 0, 0, 170),
     });
   }
 
-  private addHeader(renderer: CliRenderer, modal: BoxRenderable, title: string): void {
-    const width = Math.max(10, modal.width - 2);
-    const esc = "esc";
-    const titleWidth = Math.max(1, width - esc.length - 1);
-    const label = truncateEnd(title, titleWidth);
-    const content = `${label}${" ".repeat(Math.max(1, width - label.length - esc.length))}${esc}`;
-    modal.add(new TextRenderable(renderer, { content, width: "100%", height: 1, fg: this.options.theme.text, bg: this.options.theme.panel, marginBottom: 1 }));
+  private button(renderer: CliRenderer, label: string, width: number): { box: BoxRenderable; label: TextRenderable } {
+    const box = new BoxRenderable(renderer, {
+      width,
+      height: 3,
+      border: true,
+      borderStyle: "rounded",
+      borderColor: this.options.theme.borderActive,
+      backgroundColor: this.options.theme.element,
+      alignItems: "center",
+      justifyContent: "center",
+    });
+    const text = new TextRenderable(renderer, {
+      content: label,
+      width: Math.max(1, label.length),
+      height: 1,
+      fg: this.options.theme.text,
+      bg: this.options.theme.element,
+    });
+    box.add(text);
+    return { box, label: text };
+  }
+
+  private setButtonState(button: { box: BoxRenderable; label: TextRenderable }, active: boolean): void {
+    button.box.borderStyle = active ? "heavy" : "rounded";
+    button.box.borderColor = active ? this.options.theme.primary : this.options.theme.borderActive;
+    button.box.backgroundColor = active ? this.options.theme.primary : this.options.theme.element;
+    button.label.fg = active ? RGBA.fromHex(this.options.theme.selectedText) : RGBA.fromHex(this.options.theme.text);
+    button.label.bg = active ? RGBA.fromHex(this.options.theme.primary) : RGBA.fromHex(this.options.theme.element);
+  }
+
+  private shortcutBar(renderer: CliRenderer, shortcuts: Shortcut[], marginTop = 0): TextRenderable {
+    return new TextRenderable(renderer, {
+      content: formatShortcuts(shortcuts, this.options.theme),
+      width: "100%",
+      height: 1,
+      bg: this.options.theme.panel,
+      marginTop,
+    });
   }
 
   private closeModal(renderer: CliRenderer, modal: BoxRenderable, backdrop: BoxRenderable): void {
@@ -344,6 +413,7 @@ export class DialogController {
       descriptionColor: this.options.theme.muted,
       selectedDescriptionColor: this.options.theme.selectedText,
       showScrollIndicator: true,
+      showSelectionIndicator: false,
       wrapSelection: true,
       itemSpacing: 0,
     };
@@ -351,22 +421,31 @@ export class DialogController {
 }
 
 function maxModalHeight(renderer: CliRenderer): number {
-  return Math.max(1, Math.min(renderer.height, Math.floor(renderer.height * 0.75)));
+  return Math.max(1, Math.min(renderer.height, Math.floor(renderer.height * 0.8)));
 }
 
 function modalInnerWidth(renderer: CliRenderer): number {
-  return Math.max(1, modalWidth(renderer) - 2);
+  return Math.max(1, modalWidth(renderer) - 4);
 }
 
 function modalWidth(renderer: CliRenderer): number {
-  return Math.max(1, Math.min(60, renderer.width - 2));
+  return Math.max(1, Math.min(72, renderer.width - 2));
 }
 
-function formatConfirmButtons(active: "cancel" | "confirm", confirmLabel: string, width: number): string {
-  const cancel = active === "cancel" ? "[cancel]" : " cancel ";
-  const confirm = active === "confirm" ? `[${confirmLabel}]` : ` ${confirmLabel} `;
-  const content = `${cancel} ${confirm}`;
-  return content.slice(0, Math.max(0, width));
+function formatShortcuts(shortcuts: Shortcut[], theme: DialogTheme): StyledText {
+  const chunks: StyledText["chunks"] = [];
+  shortcuts.forEach((shortcut, index) => {
+    if (index > 0) chunks.push({ __isChunk: true, text: "  " });
+    chunks.push({
+      __isChunk: true,
+      text: ` ${shortcut.key} `,
+      fg: RGBA.fromHex(theme.primary),
+      bg: RGBA.fromHex(theme.element),
+      attributes: TextAttributes.BOLD,
+    });
+    chunks.push({ __isChunk: true, text: ` ${shortcut.label}`, fg: RGBA.fromHex(theme.muted) });
+  });
+  return new StyledText(chunks);
 }
 
 function estimateWrappedRows(content: string, width: number): number {
@@ -375,13 +454,6 @@ function estimateWrappedRows(content: string, width: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
-}
-
-function truncateEnd(value: string, width: number): string {
-  if (width <= 0) return "";
-  if (value.length <= width) return value;
-  if (width <= 3) return ".".repeat(width);
-  return `${value.slice(0, width - 3)}...`;
 }
 
 function isCancelKey(key: KeyEvent): boolean {
@@ -394,4 +466,9 @@ function isKey(key: KeyEvent, value: string): boolean {
 
 function isSubmitKey(key: KeyEvent): boolean {
   return key.name === "return" || key.name === "enter" || key.sequence === "\r" || key.sequence === "\n";
+}
+
+function consumeKey(key: KeyEvent): void {
+  key.preventDefault();
+  key.stopPropagation();
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
-import { InputRenderable, SelectRenderable } from "@opentui/core";
+import { BoxRenderable, InputRenderable, SelectRenderable } from "@opentui/core";
 
 import { MiniproTuiApp } from "../src/app";
 import type { MiniproResult } from "../src/types";
@@ -27,6 +27,11 @@ test("switches from the desktop workbench to native compact tabs on resize", asy
   expect(desktop).toContain("Chip Search");
   expect(desktop).toContain("Actions / Log");
   expect(desktop).toContain("Safety");
+  expect(desktop).toContain("╭");
+  expect(desktop).toContain("┏");
+  expect(desktop).toContain("[Tab] focus");
+  expect(desktop).toContain("[Enter] open");
+  expect(desktop).toContain("[E] EPROMs");
 
   setup.mockInput.pressKey("f");
   await setup.flush();
@@ -61,6 +66,59 @@ test("switches from the desktop workbench to native compact tabs on resize", asy
   setup.renderer.destroy();
 });
 
+
+test("search fields release focus through Escape and outside clicks", async () => {
+  const setup = await createTestRenderer({ width: 120, height: 32 });
+  const app = new MiniproTuiApp({
+    renderer: setup.renderer,
+    persistence: false,
+    commandRunner: async (args) => {
+      if (args[0] === "-Q") return result(args, await Bun.file("fixtures/minipro-q.txt").text());
+      if (args[0] === "-k") return result(args, await Bun.file("fixtures/minipro-k-none.txt").text());
+      if (args.includes("-L")) return result(args, await Bun.file("fixtures/minipro-l-at28c64b.txt").text());
+      if (args.includes("-d")) return result(args, "", await Bun.file("fixtures/minipro-d-at28c64b.txt").text());
+      return result(args);
+    },
+  });
+  await app.start();
+  await setup.flush();
+
+  const fileQuery = setup.renderer.root.findDescendantById("file-query") as InputRenderable;
+  const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
+  const statusPanel = setup.renderer.root.findDescendantById("status-panel") as BoxRenderable;
+  setup.mockInput.pressKey("f");
+  setup.mockInput.pressKey("q");
+  await setup.flush();
+  expect(fileQuery.focused).toBe(true);
+  expect(setup.captureCharFrame()).toContain("[Enter/Esc] results");
+
+  setup.mockInput.pressEscape();
+  await Bun.sleep(25);
+  await setup.flush();
+  expect(fileQuery.focused).toBe(false);
+  expect(files.focused).toBe(true);
+  expect(fileQuery.value).toBe("q");
+
+  setup.mockInput.pressKey("f");
+  await setup.flush();
+  await setup.mockMouse.click(statusPanel.screenX + 2, statusPanel.screenY + 2);
+  await setup.flush();
+  expect(fileQuery.focused).toBe(false);
+  expect(files.focused).toBe(true);
+
+  const chipQuery = setup.renderer.root.findDescendantById("chip-query") as InputRenderable;
+  const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
+  chipQuery.focus();
+  chipQuery.value = "unsubmitted query";
+  setup.mockInput.pressEscape();
+  await Bun.sleep(25);
+  await setup.flush();
+  expect(chipQuery.focused).toBe(false);
+  expect(chips.focused).toBe(true);
+  expect(chipQuery.value).toBe("AT28C64B");
+  setup.renderer.destroy();
+});
+
 test("compact chip shortcut moves focus before a slow search completes", async () => {
   const setup = await createTestRenderer({ width: 70, height: 24 });
   let delaySearch = false;
@@ -85,7 +143,7 @@ test("compact chip shortcut moves focus before a slow search completes", async (
   delaySearch = true;
   const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
   files.focus();
-  setup.mockInput.pressKey("/");
+  setup.mockInput.pressKey("e");
   await setup.flush();
 
   const chipQuery = setup.renderer.root.findDescendantById("chip-query") as InputRenderable;
@@ -124,7 +182,7 @@ test("quit aborts and joins an in-flight database search", async () => {
   delaySearch = true;
   const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
   files.focus();
-  setup.mockInput.pressKey("/");
+  setup.mockInput.pressKey("e");
   await setup.flush();
   const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
   chips.focus();
