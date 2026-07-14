@@ -24,59 +24,70 @@ jobs:
           bun-version: 1.3.14
       - name: Apply reviewed UI changes
         run: |
-          if grep -q 'Keyboard Reference' src/app.ts; then
-            echo "UI patch already applied"
-            rm -f .ui-review-error.log
-            exit 0
+          if ! grep -q 'Keyboard Reference' src/app.ts; then
+            python3 - <<'PY'
+            from pathlib import Path
+            path = Path("scripts/apply-ui-review.py")
+            source = path.read_text()
+            source = source.replace(
+                "app = replace_once(app,\n    '''  private async help(): Promise<void> {",
+                "app = replace_once(app,\n    r'''  private async help(): Promise<void> {",
+                1,
+            )
+            source = source.replace(
+                "  }''',\n    '''  private async help(): Promise<void> {",
+                "  }''',\n    r'''  private async help(): Promise<void> {",
+                1,
+            )
+            path.write_text(source)
+            PY
+            python3 scripts/apply-ui-review.py
           fi
+          rm -f .ui-review-error.log .ui-review-test.log
           python3 - <<'PY'
           from pathlib import Path
-          path = Path("scripts/apply-ui-review.py")
-          source = path.read_text()
-          source = source.replace(
-              "app = replace_once(app,\n    '''  private async help(): Promise<void> {",
-              "app = replace_once(app,\n    r'''  private async help(): Promise<void> {",
+
+          dialogs_path = Path("src/tui/dialogs.ts")
+          dialogs = dialogs_path.read_text()
+          dialogs = dialogs.replace("Math.max(3, maxHeight - 10)", "Math.max(3, maxHeight - 11)", 1)
+          dialogs = dialogs.replace("this.modalBox(renderer, title, textHeight + 10)", "this.modalBox(renderer, title, textHeight + 11)", 1)
+          dialogs = dialogs.replace(
+              '''    modal.add(this.shortcutBar(renderer, [
+              { key: "←/→", label: "choose" },
+              { key: "Enter", label: "activate" },
+              { key: "Y", label: "confirm" },
+              { key: "N/Esc", label: "cancel" },
+            ]));''',
+              '''    modal.add(this.shortcutBar(renderer, [
+              { key: "←/→", label: "choose" },
+              { key: "Enter", label: "activate" },
+            ]));
+            modal.add(this.shortcutBar(renderer, [
+              { key: "Y", label: "confirm" },
+              { key: "N/Esc", label: "cancel" },
+            ]));''',
               1,
           )
-          source = source.replace(
-              "  }''',\n    '''  private async help(): Promise<void> {",
-              "  }''',\n    r'''  private async help(): Promise<void> {",
+          dialogs = dialogs.replace(
+              "textHeight + 10, (height) => { body.height = Math.max(1, height - 10); }",
+              "textHeight + 11, (height) => { body.height = Math.max(1, height - 11); }",
               1,
           )
-          path.write_text(source)
+          dialogs_path.write_text(dialogs)
+
+          app_path = Path("src/app.ts")
+          app = app_path.read_text()
+          app = app.replace('case "files-panel": return " [Enter] open  [Space] choose  [Backspace] up ";', 'case "files-panel": return " [Enter] open ";', 1)
+          app = app.replace('case "chip-panel": return " [Enter] choose  [/] search  [I] details ";', 'case "chip-panel": return " [Enter] choose ";', 1)
+          app = app.replace('case "log-panel": return " [↑/↓] scroll  [L] focus ";', 'case "log-panel": return " [↑/↓] scroll ";', 1)
+          app_path.write_text(app)
           PY
-          set +e
-          python3 scripts/apply-ui-review.py > .ui-review-error.log 2>&1
-          status=$?
-          cat .ui-review-error.log
-          if [ "$status" -ne 0 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .ui-review-error.log
-            git commit -m "chore: capture UI patch failure"
-            git push
-            exit "$status"
-          fi
-          rm -f .ui-review-error.log
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Type-check
         run: bunx tsc --noEmit
       - name: Test
-        run: |
-          set +e
-          bun test > .ui-review-test.log 2>&1
-          status=$?
-          cat .ui-review-test.log
-          if [ "$status" -ne 0 ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add src test .ui-review-test.log
-            git commit -m "chore: capture UI test failure"
-            git push
-            exit "$status"
-          fi
-          rm .ui-review-test.log
+        run: bun test
       - name: Commit verified changes
         run: |
           rm scripts/apply-ui-review.py .github/workflows/ui-review-apply.yml
