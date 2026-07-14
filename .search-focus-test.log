@@ -1,78 +1,78 @@
 bun test v1.3.14 (0d9b296a)
 
 ::group::test/state.test.ts:
-(pass) persists and restores preferences and recents [8.81ms]
-(pass) rejects malformed or unsupported persisted state [0.29ms]
+(pass) persists and restores preferences and recents [15.33ms]
+(pass) rejects malformed or unsupported persisted state [0.32ms]
 
 ::endgroup::
 
 ::group::test/image.test.ts:
-(pass) normalizes Intel HEX data and fills address gaps [1.16ms]
-(pass) preserves nonzero structured-image addresses [0.12ms]
-(pass) normalizes S-record data [0.38ms]
-(pass) rejects malformed structured images instead of treating text as bytes [0.56ms]
+(pass) normalizes Intel HEX data and fills address gaps [1.22ms]
+(pass) preserves nonzero structured-image addresses [0.13ms]
+(pass) normalizes S-record data [0.44ms]
+(pass) rejects malformed structured images instead of treating text as bytes [0.54ms]
 
 ::endgroup::
 
 ::group::test/minipro-parse.test.ts:
-(pass) parses supported programmer list [0.47ms]
+(pass) parses supported programmer list [0.49ms]
 (pass) parses no-programmer state [0.23ms]
-(pass) treats missing minipro binary as disconnected [0.06ms]
-(pass) parses chip search results exactly [0.20ms]
-(pass) parses chip info fields and preserves raw output [0.37ms]
-(pass) parses chip programming voltage metadata [0.08ms]
-(pass) keeps unknown chip info lines nonfatal [0.04ms]
-(pass) parses the leading code-memory region from compound descriptions [0.09ms]
+(pass) treats missing minipro binary as disconnected [0.05ms]
+(pass) parses chip search results exactly [0.18ms]
+(pass) parses chip info fields and preserves raw output [0.36ms]
+(pass) parses chip programming voltage metadata [0.07ms]
+(pass) keeps unknown chip info lines nonfatal [0.03ms]
+(pass) parses the leading code-memory region from compound descriptions [0.06ms]
 
 ::endgroup::
 
 ::group::test/tui-render.test.ts:
-(pass) status line shows disconnected programmer state [0.08ms]
-(pass) status line stays compact [0.08ms]
-(pass) status summary shows matching chip and image as ready [0.47ms]
-(pass) status summary styles enabled and dangerous disabled stages [0.36ms]
-(pass) status summary blocks size mismatch by default [0.08ms]
+(pass) status line shows disconnected programmer state [0.11ms]
+(pass) status line stays compact [0.07ms]
+(pass) status summary shows matching chip and image as ready [0.44ms]
+(pass) status summary styles enabled and dangerous disabled stages [0.37ms]
+(pass) status summary blocks size mismatch by default [0.12ms]
 (pass) status defers structured image sizing until normalization [0.11ms]
-(pass) status summary exposes dangerous overrides [0.15ms]
-(pass) status summary stays within the available panel width [0.21ms]
+(pass) status summary exposes dangerous overrides [0.16ms]
+(pass) status summary stays within the available panel width [0.17ms]
 (pass) chip labels include useful database metadata [0.18ms]
-(pass) log formatting strips terminal escape sequences and bolds commands [0.20ms]
+(pass) log formatting strips terminal escape sequences and bolds commands [0.18ms]
 
 ::endgroup::
 
 ::group::test/workflow.test.ts:
-(pass) default flow includes pin check, erase, blank check, write, verify, and readback compare [2.55ms]
-(pass) default flow blocks on missing file [0.11ms]
-(pass) default flow blocks on missing chip [0.09ms]
+(pass) default flow includes pin check, erase, blank check, write, verify, and readback compare [2.93ms]
+(pass) default flow blocks on missing file [0.13ms]
+(pass) default flow blocks on missing chip [0.12ms]
 (pass) default flow blocks on known size mismatch [0.10ms]
-(pass) default flow allows size mismatch only when explicit override is enabled [0.76ms]
-(pass) workflow stops after a failed step [0.76ms]
-(pass) write flow continues when the programmer reports that pin checks are unsupported [0.72ms]
-(pass) write flow also continues if an unsupported pin check exits nonzero [0.70ms]
-(pass) write flow rejects a different connected programmer before chip actions [0.58ms]
-(pass) write flow rejects an unrecognized connected programmer [0.57ms]
-(pass) write flow revalidates live chip size before destructive steps [0.54ms]
-(pass) default flow writes confirmed bytes even if the source path changes [1.06ms]
-(pass) optional backup completes before erase and is preserved [9.26ms]
-(pass) read workflow reads to a file and reports checksum [2.80ms]
-(pass) read workflow requires confirmation [0.10ms]
-(pass) reads refuse to replace an existing destination [0.58ms]
-(pass) read refuses to replace a destination created after confirmation [2.28ms]
-(pass) compare workflow reports matched hashes [0.83ms]
-(pass) compare workflow reports mismatched hashes [0.43ms]
+(pass) default flow allows size mismatch only when explicit override is enabled [0.75ms]
+(pass) workflow stops after a failed step [0.80ms]
+(pass) write flow continues when the programmer reports that pin checks are unsupported [1.31ms]
+(pass) write flow also continues if an unsupported pin check exits nonzero [0.75ms]
+(pass) write flow rejects a different connected programmer before chip actions [0.63ms]
+(pass) write flow rejects an unrecognized connected programmer [0.56ms]
+(pass) write flow revalidates live chip size before destructive steps [0.52ms]
+(pass) default flow writes confirmed bytes even if the source path changes [1.10ms]
+(pass) optional backup completes before erase and is preserved [9.29ms]
+(pass) read workflow reads to a file and reports checksum [2.97ms]
+(pass) read workflow requires confirmation [0.11ms]
+(pass) reads refuse to replace an existing destination [0.79ms]
+(pass) read refuses to replace a destination created after confirmation [2.34ms]
+(pass) compare workflow reports matched hashes [1.00ms]
+(pass) compare workflow reports mismatched hashes [0.42ms]
 
 ::endgroup::
 
 ::group::test/dialogs.test.ts:
-(pass) confirmation renders bordered controls with safe keyboard defaults [159.80ms]
-(pass) long message content scrolls and escape restores control [60.77ms]
-(pass) open dialogs stay inside the terminal after resize [80.84ms]
-(pass) confirmation controls remain visible after shrinking a long preview [80.13ms]
+(pass) confirmation renders bordered controls with safe keyboard defaults [168.33ms]
+(pass) long message content scrolls and escape restores control [62.23ms]
+(pass) open dialogs stay inside the terminal after resize [81.37ms]
+(pass) confirmation controls remain visible after shrinking a long preview [81.49ms]
 
 ::endgroup::
 
 ::group::test/app-interaction.test.ts:
-(pass) switches from the desktop workbench to native compact tabs on resize [239.11ms]
+(pass) switches from the desktop workbench to native compact tabs on resize [242.19ms]
 92 |   expect(fileQuery.focused).toBe(true);
 93 |   expect(setup.captureCharFrame()).toContain("[Enter/Esc] results");
 94 | 
@@ -88,41 +88,41 @@ Received: true
       at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/app-interaction.test.ts:97:29)
 
 ::error file=test/app-interaction.test.ts,line=97,col=29,title=error: expect(received).toBe(expected)::Expected: false%0AReceived: true%0A%0A      at <anonymous> (/home/runner/work/minipro-tui/minipro-tui/test/app-interaction.test.ts:97:29)
-(fail) search fields release focus through Escape and outside clicks [62.90ms]
-(pass) compact chip shortcut moves focus before a slow search completes [59.84ms]
-(pass) quit aborts and joins an in-flight database search [44.45ms]
+(fail) search fields release focus through Escape and outside clicks [61.38ms]
+(pass) compact chip shortcut moves focus before a slow search completes [62.61ms]
+(pass) quit aborts and joins an in-flight database search [45.07ms]
 
 ::endgroup::
 
 ::group::test/files.test.ts:
 (pass) file scanner excludes directories and shows programming files by default [2.00ms]
-(pass) file tree scanner includes directories and filters files by default [1.16ms]
-(pass) file scanner can include all files [1.37ms]
-(pass) file scanner orders files by newest modified time first [1.38ms]
-(pass) hash cache invalidates when file size or mtime changes [1.30ms]
-(pass) hashing rejects stale file metadata [0.61ms]
+(pass) file tree scanner includes directories and filters files by default [1.08ms]
+(pass) file scanner can include all files [1.28ms]
+(pass) file scanner orders files by newest modified time first [1.31ms]
+(pass) hash cache invalidates when file size or mtime changes [1.08ms]
+(pass) hashing rejects stale file metadata [0.55ms]
 (pass) short SHA output is stable [0.03ms]
-(pass) scanner does not hash files larger than the operation limit [0.50ms]
+(pass) scanner does not hash files larger than the operation limit [0.51ms]
 
 ::endgroup::
 
 ::group::test/commands.test.ts:
-(pass) builds argv arrays for minipro commands [0.13ms]
-(pass) passes chip names with package characters as one argv entry [0.03ms]
-(pass) keeps user-requested dangerous overrides absent from default flow [0.13ms]
+(pass) builds argv arrays for minipro commands [0.11ms]
+(pass) passes chip names with package characters as one argv entry [0.02ms]
+(pass) keeps user-requested dangerous overrides absent from default flow [0.16ms]
 (pass) write preview reflects advanced options [0.10ms]
-(pass) write preview places an optional backup before erase [0.06ms]
+(pass) write preview places an optional backup before erase [0.05ms]
 (pass) scopes advanced options to minipro modes that support them [0.16ms]
-(pass) streams minipro output as complete log lines [26.03ms]
-(pass) cancels a running minipro process and reports the abort [0.97ms]
-(pass) force-kills a process tree that exceeds the output limit [44.64ms]
+(pass) streams minipro output as complete log lines [27.12ms]
+(pass) cancels a running minipro process and reports the abort [1.31ms]
+(pass) force-kills a process tree that exceeds the output limit [45.39ms]
 
 ::endgroup::
 
 1 tests failed:
-(fail) search fields release focus through Escape and outside clicks [62.90ms]
+(fail) search fields release focus through Escape and outside clicks [61.38ms]
 
  67 pass
  1 fail
  222 expect() calls
-Ran 68 tests across 9 files. [1179.00ms]
+Ran 68 tests across 9 files. [1194.00ms]
