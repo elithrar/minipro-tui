@@ -14,7 +14,7 @@ const theme = {
   muted: "#808080",
 };
 
-test("confirmation renders a bordered modal with safe, keyboard-driven actions", async () => {
+test("confirmation renders bordered controls with safe keyboard defaults", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24 });
   let opened = 0;
   let closed = 0;
