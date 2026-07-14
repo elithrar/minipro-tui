@@ -1,0 +1,59 @@
+name: Apply EPROM shortcut
+
+on:
+  push:
+    branches:
+      - codex/ui-chrome-review
+
+permissions:
+  contents: write
+
+jobs:
+  update-shortcut:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ui-chrome-review
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Replace chip-search shortcut
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          app_path = Path("src/app.ts")
+          app = app_path.read_text()
+          app = replace_once(app, '      if (key.name === "/") {', '      if (key.name === "e") {', "key binding")
+          app = replace_once(app, '        "  /          Focus chip search",', '        "  E          Focus EPROM search",', "help text")
+          app = replace_once(app, '  return "[Tab] focus  [Enter] select  [F] files  [/] chips  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit";', '  return "[Tab] focus  [Enter] select  [F] files  [E] EPROMs  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit";', "footer")
+          app_path.write_text(app)
+
+          test_path = Path("test/app-interaction.test.ts")
+          test = test_path.read_text()
+          count = test.count('setup.mockInput.pressKey("/");')
+          if count != 2:
+              raise RuntimeError(f"shortcut tests: expected 2 matches, found {count}")
+          test = test.replace('setup.mockInput.pressKey("/");', 'setup.mockInput.pressKey("e");')
+          test = replace_once(test, '  expect(desktop).toContain("[Enter] open");', '  expect(desktop).toContain("[Enter] open");\n  expect(desktop).toContain("[E] EPROMs");', "footer assertion")
+          test_path.write_text(test)
+          PY
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun test
+      - name: Commit verified shortcut update
+        run: |
+          rm .github/workflows/shortcut-refine.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use E for EPROM search"
+          git push
