@@ -208,6 +208,7 @@ export class MiniproTuiApp {
       flexDirection: "column",
       padding: 1,
       backgroundColor: BG,
+      onMouseDown: (event) => this.handleWorkbenchPointerDown(event.x, event.y),
     });
 
     const compactTabs = new TabSelectRenderable(renderer, {
@@ -251,6 +252,12 @@ export class MiniproTuiApp {
       cursorColor: PRIMARY,
       marginBottom: 1,
     });
+    fileQuery.onKeyDown = (key) => {
+      if (isEscapeKey(key)) {
+        consumeKey(key);
+        this.exitSearchInput();
+      }
+    };
     const files = new SelectRenderable(renderer, selectOptions("files", "100%"));
     filesPanel.add(fileQuery);
     filesPanel.add(files);
@@ -268,6 +275,12 @@ export class MiniproTuiApp {
       cursorColor: PRIMARY,
       marginBottom: 1,
     });
+    chipQuery.onKeyDown = (key) => {
+      if (isEscapeKey(key)) {
+        consumeKey(key);
+        this.exitSearchInput();
+      }
+    };
     const chips = new SelectRenderable(renderer, {
       ...selectOptions("chips", "100%"),
       showDescription: false,
@@ -344,6 +357,11 @@ export class MiniproTuiApp {
       }
 
       if (components.fileQuery.focused || components.chipQuery.focused) {
+        if (isEscapeKey(key)) {
+          consumeKey(key);
+          this.exitSearchInput();
+          return;
+        }
         if (key.name === "tab") {
           consumeKey(key);
           this.focusNext();
@@ -965,6 +983,8 @@ export class MiniproTuiApp {
         "  Enter      Activate the selected item",
         "  F          Focus file search",
         "  E          Focus EPROM search",
+        "  Esc        Leave an active search field",
+        "  Mouse      Click another pane to leave search",
         "  L          Focus the action log",
         "",
         "Actions",
@@ -1097,6 +1117,44 @@ export class MiniproTuiApp {
     this.render();
   }
 
+  private exitSearchInput(): boolean {
+    const components = this.requireComponents();
+    if (components.fileQuery.focused) {
+      components.fileQuery.blur();
+      components.files.focus();
+      this.render();
+      return true;
+    }
+    if (components.chipQuery.focused) {
+      components.chipQuery.value = this.chipQuery;
+      components.chipQuery.blur();
+      components.chips.focus();
+      this.render();
+      return true;
+    }
+    return false;
+  }
+
+  private handleWorkbenchPointerDown(x: number, y: number): void {
+    const components = this.components;
+    if (!components) return;
+    const activeSearch = components.fileQuery.focused ? "files" : components.chipQuery.focused ? "chips" : undefined;
+    if (!activeSearch) return;
+    if (pointInRenderable(components.fileQuery, x, y) || pointInRenderable(components.chipQuery, x, y)) return;
+
+    if (activeSearch === "files") components.fileQuery.blur();
+    else {
+      components.chipQuery.value = this.chipQuery;
+      components.chipQuery.blur();
+    }
+    if (pointInRenderable(components.filesPanel, x, y)) components.files.focus();
+    else if (pointInRenderable(components.chipPanel, x, y)) components.chips.focus();
+    else if (pointInRenderable(components.logPanel, x, y)) components.log.focus();
+    else if (activeSearch === "files") components.files.focus();
+    else components.chips.focus();
+    this.render();
+  }
+
   private focusNext(): void {
     const focusables = this.focusableControls();
     const current = focusables.findIndex((item) => item.focused);
@@ -1196,8 +1254,18 @@ export class MiniproTuiApp {
 
   private renderFocusState(focus: string): void {
     const components = this.requireComponents();
-    setPanelFocus(components.filesPanel, `Files ${formatDirectoryLabel(this.fileDirectory)}`, focus === "File Search" || focus === "Files");
-    setPanelFocus(components.chipPanel, "Chip Search", focus === "Chip Search" || focus === "Chip Results");
+    setPanelFocus(
+      components.filesPanel,
+      `Files ${formatDirectoryLabel(this.fileDirectory)}`,
+      focus === "File Search" || focus === "Files",
+      focus === "File Search" ? " [Enter/Esc] results " : undefined,
+    );
+    setPanelFocus(
+      components.chipPanel,
+      "Chip Search",
+      focus === "Chip Search" || focus === "Chip Results",
+      focus === "Chip Search" ? " [Enter] search  [Esc] results " : undefined,
+    );
     setPanelFocus(components.statusPanel, "Status", false);
     setPanelFocus(components.logPanel, "Actions / Log", focus === "Log");
   }
@@ -1491,12 +1559,16 @@ function formatDirectoryLabel(directory: string): string {
   return relativePath ? truncateEnd(relativePath, 24) : ".";
 }
 
-function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): void {
+function pointInRenderable(renderable: { screenX: number; screenY: number; width: number; height: number }, x: number, y: number): boolean {
+  return x >= renderable.screenX && x < renderable.screenX + renderable.width && y >= renderable.screenY && y < renderable.screenY + renderable.height;
+}
+
+function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean, shortcut?: string): void {
   panel.title = ` ${title} `;
   panel.titleColor = focused ? TEXT : PRIMARY;
   panel.borderStyle = focused ? "heavy" : "rounded";
   panel.borderColor = focused ? PRIMARY : BORDER;
-  panel.bottomTitle = focused ? panelShortcut(panel.id) : undefined;
+  panel.bottomTitle = focused ? shortcut ?? panelShortcut(panel.id) : undefined;
   panel.bottomTitleAlignment = "right";
 }
 
@@ -1519,6 +1591,10 @@ function isCompactPanel(value: unknown): value is CompactPanel {
 
 function compactPanelIndex(panel: CompactPanel): number {
   return panel === "files" ? 0 : panel === "chips" ? 1 : panel === "status" ? 2 : 3;
+}
+
+function isEscapeKey(key: KeyEvent): boolean {
+  return key.name === "escape" || key.name === "esc" || key.raw === "\x1b" || key.sequence === "\x1b";
 }
 
 function consumeKey(key: KeyEvent): void {
