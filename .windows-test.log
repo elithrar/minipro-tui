@@ -1,0 +1,143 @@
+bun test v1.3.14 (0d9b296a)
+
+::group::test\app-interaction.test.ts:
+(pass) switches from the desktop workbench to native compact tabs on resize [400.16ms]
+(pass) compact chip shortcut moves focus before a slow search completes [95.56ms]
+(pass) quit aborts and joins an in-flight database search [76.02ms]
+
+::endgroup::
+
+::group::test\commands.test.ts:
+(pass) builds argv arrays for minipro commands [0.66ms]
+(pass) passes chip names with package characters as one argv entry [0.07ms]
+(pass) keeps user-requested dangerous overrides absent from default flow [0.32ms]
+(pass) write preview reflects advanced options [0.28ms]
+(pass) write preview places an optional backup before erase [0.14ms]
+(pass) scopes advanced options to minipro modes that support them [0.28ms]
+(pass) streams minipro output as complete log lines [75.81ms]
+(pass) cancels a running minipro process and reports the abort [107.91ms]
+(pass) force-kills a process tree that exceeds the output limit [138.52ms]
+
+::endgroup::
+
+::group::test\dialogs.test.ts:
+(pass) confirmation renders bordered controls with safe keyboard defaults [219.11ms]
+(pass) long message content scrolls and escape restores control [77.24ms]
+(pass) open dialogs stay inside the terminal after resize [111.17ms]
+(pass) confirmation controls remain visible after shrinking a long preview [96.49ms]
+
+::endgroup::
+
+::group::test\files.test.ts:
+(pass) file scanner excludes directories and shows programming files by default [7.85ms]
+(pass) file tree scanner includes directories and filters files by default [2.61ms]
+(pass) file scanner can include all files [4.71ms]
+(pass) file scanner orders files by newest modified time first [5.31ms]
+(pass) hash cache invalidates when file size or mtime changes [4.49ms]
+(pass) hashing rejects stale file metadata [6.87ms]
+(pass) short SHA output is stable [0.09ms]
+(pass) scanner does not hash files larger than the operation limit [1.30ms]
+
+::endgroup::
+
+::group::test\image.test.ts:
+(pass) normalizes Intel HEX data and fills address gaps [1.22ms]
+(pass) preserves nonzero structured-image addresses [0.17ms]
+(pass) normalizes S-record data [0.50ms]
+(pass) rejects malformed structured images instead of treating text as bytes [0.89ms]
+
+::endgroup::
+
+::group::test\minipro-parse.test.ts:
+(pass) parses supported programmer list [6.57ms]
+(pass) parses no-programmer state [0.70ms]
+(pass) treats missing minipro binary as disconnected [0.12ms]
+(pass) parses chip search results exactly [0.81ms]
+(pass) parses chip info fields and preserves raw output [0.84ms]
+(pass) parses chip programming voltage metadata [0.14ms]
+(pass) keeps unknown chip info lines nonfatal [0.08ms]
+(pass) parses the leading code-memory region from compound descriptions [0.11ms]
+
+::endgroup::
+
+::group::test\state.test.ts:
+(pass) persists and restores preferences and recents [9.42ms]
+(pass) rejects malformed or unsupported persisted state [1.16ms]
+
+::endgroup::
+
+::group::test\tui-render.test.ts:
+(pass) status line shows disconnected programmer state [0.12ms]
+(pass) status line stays compact [0.14ms]
+(pass) status summary shows matching chip and image as ready [0.49ms]
+(pass) status summary styles enabled and dangerous disabled stages [0.50ms]
+(pass) status summary blocks size mismatch by default [0.14ms]
+(pass) status defers structured image sizing until normalization [0.19ms]
+(pass) status summary exposes dangerous overrides [0.24ms]
+(pass) status summary stays within the available panel width [0.27ms]
+(pass) chip labels include useful database metadata [0.13ms]
+(pass) log formatting strips terminal escape sequences and bolds commands [0.20ms]
+
+::endgroup::
+
+::group::test\workflow.test.ts:
+(pass) default flow includes pin check, erase, blank check, write, verify, and readback compare [8.89ms]
+(pass) default flow blocks on missing file [0.19ms]
+(pass) default flow blocks on missing chip [0.18ms]
+(pass) default flow blocks on known size mismatch [0.19ms]
+(pass) default flow allows size mismatch only when explicit override is enabled [3.23ms]
+(pass) workflow stops after a failed step [2.75ms]
+(pass) write flow continues when the programmer reports that pin checks are unsupported [5.16ms]
+(pass) write flow also continues if an unsupported pin check exits nonzero [2.43ms]
+(pass) write flow rejects a different connected programmer before chip actions [2.25ms]
+(pass) write flow rejects an unrecognized connected programmer [1.95ms]
+(pass) write flow revalidates live chip size before destructive steps [2.03ms]
+(pass) default flow writes confirmed bytes even if the source path changes [3.12ms]
+269 |       return ok(args, args[0] === "-k" ? "T48" : "");
+270 |     },
+271 |     readFileBytes: async () => bytes,
+272 |   });
+273 | 
+274 |   expect(result.ok).toBe(true);
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\a\minipro-tui\minipro-tui\test\workflow.test.ts:274:21)
+
+::error file=test\workflow.test.ts,line=274,col=21,title=error: expect(received).toBe(expected)::Expected: true%0AReceived: false%0A%0A      at <anonymous> (D:\a\minipro-tui\minipro-tui\test\workflow.test.ts:274:21)
+(fail) optional backup completes before erase and is preserved [9.20ms]
+292 |       const readIndex = args.indexOf("-r");
+293 |       if (readIndex !== -1) await writeFile(args[readIndex + 1]!, new Uint8Array([1, 2, 3, 4]));
+294 |       return ok(args, args[0] === "-k" ? "T48" : "");
+295 |     },
+296 |   });
+297 |   expect(result.ok).toBe(true);
+                          ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at <anonymous> (D:\a\minipro-tui\minipro-tui\test\workflow.test.ts:297:21)
+
+::error file=test\workflow.test.ts,line=297,col=21,title=error: expect(received).toBe(expected)::Expected: true%0AReceived: false%0A%0A      at <anonymous> (D:\a\minipro-tui\minipro-tui\test\workflow.test.ts:297:21)
+(fail) read workflow reads to a file and reports checksum [4.36ms]
+(pass) read workflow requires confirmation [0.17ms]
+(pass) reads refuse to replace an existing destination [1.20ms]
+(pass) read refuses to replace a destination created after confirmation [6.45ms]
+(pass) compare workflow reports matched hashes [2.15ms]
+(pass) compare workflow reports mismatched hashes [1.43ms]
+
+::endgroup::
+
+2 tests failed:
+(fail) optional backup completes before erase and is preserved [9.20ms]
+(fail) read workflow reads to a file and reports checksum [4.36ms]
+
+ 65 pass
+ 2 fail
+ 211 expect() calls
+Ran 67 tests across 9 files. [1.86s]
