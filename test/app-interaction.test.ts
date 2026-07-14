@@ -31,6 +31,7 @@ test("switches from the desktop workbench to native compact tabs on resize", asy
   expect(desktop).toContain("┏");
   expect(desktop).toContain("[Tab] focus");
   expect(desktop).toContain("[Enter] open");
+  expect(desktop).toContain("[E] EPROMs");
 
   setup.mockInput.pressKey("f");
   await setup.flush();
@@ -89,7 +90,7 @@ test("compact chip shortcut moves focus before a slow search completes", async (
   delaySearch = true;
   const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
   files.focus();
-  setup.mockInput.pressKey("/");
+  setup.mockInput.pressKey("e");
   await setup.flush();
 
   const chipQuery = setup.renderer.root.findDescendantById("chip-query") as InputRenderable;
@@ -128,7 +129,7 @@ test("quit aborts and joins an in-flight database search", async () => {
   delaySearch = true;
   const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
   files.focus();
-  setup.mockInput.pressKey("/");
+  setup.mockInput.pressKey("e");
   await setup.flush();
   const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
   chips.focus();

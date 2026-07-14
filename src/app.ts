@@ -363,7 +363,7 @@ export class MiniproTuiApp {
         return;
       }
 
-      if (key.name === "/") {
+      if (key.name === "e") {
         consumeKey(key);
         this.showCompactPanel("chips");
         components.chipQuery.focus();
@@ -964,7 +964,7 @@ export class MiniproTuiApp {
         "  Tab        Move focus",
         "  Enter      Activate the selected item",
         "  F          Focus file search",
-        "  /          Focus chip search",
+        "  E          Focus EPROM search",
         "  L          Focus the action log",
         "",
         "Actions",
@@ -1326,7 +1326,7 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
 }
 
 function footerText(): string {
-  return "[Tab] focus  [Enter] select  [F] files  [/] chips  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit";
+  return "[Tab] focus  [Enter] select  [F] files  [E] EPROMs  [W] write  [Shift+R] read  [M] compare  [?] help  [Q] quit";
 }
 
 function formatWriteActionSummary(options: AdvancedOptions, backup: boolean): string {
