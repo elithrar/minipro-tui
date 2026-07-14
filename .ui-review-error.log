@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/runner/work/minipro-tui/minipro-tui/scripts/apply-ui-review.py", line 28, in <module>
+    app = replace_once(app,
+          ^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/minipro-tui/minipro-tui/scripts/apply-ui-review.py", line 14, in replace_once
+    raise RuntimeError(f"{label}: expected exactly one match, found {count}")
+RuntimeError: help content: expected exactly one match, found 0
