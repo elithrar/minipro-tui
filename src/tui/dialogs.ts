@@ -45,8 +45,8 @@ export class DialogController {
     const renderer = this.options.getRenderer();
     this.options.onOpen();
     const maxHeight = maxModalHeight(renderer);
-    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 10));
-    const modal = this.modalBox(renderer, title, textHeight + 10);
+    const textHeight = clamp(estimateWrappedRows(content, modalInnerWidth(renderer)), 3, Math.max(3, maxHeight - 11));
+    const modal = this.modalBox(renderer, title, textHeight + 11);
     const body = this.scrollableText(renderer, content, textHeight);
     body.marginBottom = 1;
     modal.add(body);
@@ -69,12 +69,14 @@ export class DialogController {
     modal.add(this.shortcutBar(renderer, [
       { key: "←/→", label: "choose" },
       { key: "Enter", label: "activate" },
+    ]));
+    modal.add(this.shortcutBar(renderer, [
       { key: "Y", label: "confirm" },
       { key: "N/Esc", label: "cancel" },
     ]));
 
     const backdrop = this.backdropBox(renderer);
-    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 10, (height) => { body.height = Math.max(1, height - 10); });
+    const unmount = this.mountModal(renderer, modal, backdrop, textHeight + 11, (height) => { body.height = Math.max(1, height - 11); });
 
     return new Promise((resolve) => {
       let settled = false;

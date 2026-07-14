@@ -1502,9 +1502,9 @@ function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean): v
 
 function panelShortcut(id: string): string | undefined {
   switch (id) {
-    case "files-panel": return " [Enter] open  [Space] choose  [Backspace] up ";
-    case "chip-panel": return " [Enter] choose  [/] search  [I] details ";
-    case "log-panel": return " [↑/↓] scroll  [L] focus ";
+    case "files-panel": return " [Enter] open ";
+    case "chip-panel": return " [Enter] choose ";
+    case "log-panel": return " [↑/↓] scroll ";
     default: return undefined;
   }
 }
