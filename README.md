@@ -95,8 +95,10 @@ The dialog reports `matched` when the hashes are identical and `files do not mat
 ## Keys
 
 ```text
-q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
+q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab/shift+tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
 ```
+
+The second status line shows the next setup step, active work, and action errors. The footer changes with the focused pane so the relevant controls stay visible.
 
 When the footer shows `esc cancel`, Escape safely cancels the active detection, read, check, verify, or readback command. Erase and write transfers are intentionally non-cancellable. Terminals narrower than 90 columns switch to Files, Chips, Status, and Log tabs.
 

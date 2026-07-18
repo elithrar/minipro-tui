@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { TextAttributes } from "@opentui/core";
 
-import { formatChipLabel, formatLogContent, formatStatusLine, formatStatusSummary, formatStatusSummaryContent, sanitizeLogLine } from "../src/tui/render";
+import { formatChipLabel, formatGuidanceLine, formatLogContent, formatStatusLine, formatStatusSummary, formatStatusSummaryContent, sanitizeLogLine } from "../src/tui/render";
 
 test("status line shows disconnected programmer state", () => {
   expect(
@@ -25,6 +25,29 @@ test("status line stays compact", () => {
   expect(line).toContain("| T48 | t48 | AT28C64B | 911 chip 89 911 28pin 3.bin | idle");
   expect(line).not.toContain("8192 B");
   expect(line).not.toContain("a1b2c3d4");
+});
+
+test("guidance prioritizes live work, action errors, blockers, and readiness", () => {
+  const base = {
+    programmerStatus: { connected: false, raw: "[No programmer found]" },
+    database: "t48" as const,
+    job: { kind: "idle" as const },
+    advanced: {},
+    activeCommandCancellable: false,
+  };
+  expect(formatGuidanceLine(base)).toContain("Next: choose an image");
+  expect(formatGuidanceLine({ ...base, chipSearch: { query: "M27C64", phase: "results" } })).toContain('Searching t48 chips for "M27C64"');
+  expect(formatGuidanceLine({ ...base, notice: { tone: "error", message: "Select an image before writing." } })).toContain("Action needed: Select an image before writing.");
+  expect(formatGuidanceLine({ ...base, job: { kind: "failed", step: "read", message: "\u001b[31mread failed\ncheck connection" } })).toContain("Failed: read failed check connection");
+
+  const selected = {
+    ...base,
+    selectedChip: "AT28C64B",
+    selectedFile: { name: "small.bin", path: "small.bin", size: 4096, modifiedAt: new Date(0), sha256Short: "a1b2c3d4" },
+    chipInfo: { name: "AT28C64B", memoryBytes: 8192, raw: "Name: AT28C64B" },
+  };
+  expect(formatGuidanceLine(selected)).toContain("Blocked: image and chip sizes differ");
+  expect(formatGuidanceLine({ ...selected, selectedFile: { ...selected.selectedFile, size: 8192 } })).toContain("Ready to review. Connect a programmer");
 });
 
 test("status summary shows matching chip and image as ready", () => {

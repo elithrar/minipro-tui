@@ -20,6 +20,19 @@ export type StatusSummaryOptions = {
   width?: number;
 };
 
+export type GuidanceInput = {
+  programmerStatus: ProgrammerStatus;
+  database: ProgrammerKind;
+  selectedChip?: string;
+  selectedFile?: FileEntry;
+  chipInfo?: ChipInfo;
+  job: JobState;
+  advanced: AdvancedOptions;
+  activeCommandCancellable: boolean;
+  notice?: { tone: "info" | "error"; message: string };
+  chipSearch?: { query: string; phase: "results" | "details" };
+};
+
 const STATUS_LABEL_WIDTH = 8;
 const COMMAND_LOG_BG = RGBA.fromHex("#282828");
 const COMMAND_LOG_FG = RGBA.fromHex("#fab283");
@@ -37,6 +50,30 @@ export function formatStatusLine(input: {
   const chip = input.selectedChip ? truncateMiddle(input.selectedChip, 24) : "no chip";
   const job = input.job.kind === "running" ? input.job.step : input.job.kind;
   return ` minipro-tui | ${programmer} | ${input.database} | ${chip} | ${file} | ${job}`;
+}
+
+export function formatGuidanceLine(input: GuidanceInput): string {
+  if (input.chipSearch?.phase === "results") return ` Searching ${input.database} chips for "${inlineText(input.chipSearch.query)}"...`;
+  if (input.chipSearch?.phase === "details") return " Loading chip details; results are ready to browse.";
+  if (input.job.kind === "running") {
+    const cancel = input.activeCommandCancellable ? " Press Esc to cancel this step." : "";
+    return ` Running: ${inlineText(input.job.step)}.${cancel}`;
+  }
+  if (input.notice) return ` ${input.notice.tone === "error" ? "Action needed" : "Note"}: ${inlineText(input.notice.message)}`;
+  if (input.job.kind === "failed") return ` Failed: ${inlineText(input.job.message)}`;
+  if (input.job.kind === "done") return ` Done: ${inlineText(input.job.message)}`;
+  if (!input.selectedFile) return " Next: choose an image in Files. Press F to filter the current folder.";
+  if (!input.selectedChip) return " Next: search for a chip with /, then press Enter to select it.";
+  if (!input.chipInfo) return " Next: wait for chip details before starting a hardware action.";
+
+  if (!/\.(hex|srec)$/i.test(input.selectedFile.name) && input.chipInfo.memoryBytes !== undefined && input.selectedFile.size !== input.chipInfo.memoryBytes && !input.advanced.allowSizeMismatch) {
+    return " Blocked: image and chip sizes differ. Choose another image or chip.";
+  }
+
+  const overrideCount = formatDangerousOptions(input.advanced).length;
+  if (overrideCount > 0) return ` Review: ${overrideCount} safety override${overrideCount === 1 ? " is" : "s are"} active. Press A before continuing.`;
+  if (!input.programmerStatus.connected) return " Ready to review. Connect a programmer before starting a hardware action.";
+  return " Ready: press W to review the safe write flow.";
 }
 
 function truncateMiddle(value: string, maxLength: number): string {
@@ -93,6 +130,10 @@ export function formatLogContent(lines: string[]): StyledText {
 
 export function sanitizeLogLine(line: string): string {
   return stripAnsiSequences(line).replace(/[\u0000-\u001f\u007f]/g, "");
+}
+
+function inlineText(value: string): string {
+  return stripAnsiSequences(value).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export function formatChipInfo(info?: ChipInfo): string {
