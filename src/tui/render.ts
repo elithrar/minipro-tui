@@ -105,10 +105,11 @@ export function formatFileTreeOption(entry: FileTreeEntry): { name: string; desc
 
 export function formatChipLabel(chip: string, info?: ChipInfo): { name: string; description: string; value: string } {
   const metadata = formatChipMetadata(info);
-  const labelParts = [chip === "AT28C64B" ? "default" : undefined, metadata].filter((part): part is string => Boolean(part));
+  const isDefault = chip === "AT28C64B" || chip.startsWith("AT28C64B@");
+  const labelParts = [isDefault ? "default" : undefined, metadata].filter((part): part is string => Boolean(part));
   return {
     name: labelParts.length > 0 ? `${chip} (${labelParts.join(", ")})` : chip,
-    description: chip === "AT28C64B" ? "default" : "",
+    description: isDefault ? "default" : "",
     value: chip,
   };
 }
@@ -141,13 +142,13 @@ export function formatChipInfo(info?: ChipInfo): string {
 
   return [
     info.name || "Unknown",
-    `Available on: ${info.availableOn ?? "unknown"}`,
+    `Aliases: ${info.aliases && info.aliases.length > 0 ? info.aliases.join(", ") : "none"}`,
     `Memory: ${info.memoryBytes === undefined ? "unknown" : `${info.memoryBytes} B`}`,
     `Package: ${info.packageName ?? "unknown"}`,
-    `ICSP: ${info.icsp ?? "unknown"}`,
-    `Protocol: ${info.protocol ?? "unknown"}`,
-    `Read buffer: ${info.readBufferSize === undefined ? "unknown" : `${info.readBufferSize} B`}`,
-    `Write buffer: ${info.writeBufferSize === undefined ? "unknown" : `${info.writeBufferSize} B`}`,
+    `Blank value: ${info.blankValue === undefined ? "unknown" : `0x${info.blankValue.toString(16).padStart(2, "0")}`}`,
+    `Electrical erase: ${info.canErase ? "supported" : "external erase required"}`,
+    `Pin check: ${info.supportsPinCheck ? "supported" : "unavailable"}`,
+    `Programmers: ${[info.supportsT48 ? "T48" : undefined, info.supportsT56 ? "T56" : undefined].filter(Boolean).join(", ")}`,
     "",
     info.raw,
   ].join("\n");
@@ -171,7 +172,7 @@ function formatChipMemory(info: ChipInfo): string {
 function formatChipMetadata(info?: ChipInfo): string {
   if (!info) return "";
 
-  const parts = [info.vcc ?? info.vdd ?? info.vpp, formatPackageName(info.packageName), info.pulseDelay].filter((part): part is string => Boolean(part));
+  const parts = [formatPackageName(info.packageName), info.canErase ? "erasable" : "external erase"].filter((part): part is string => Boolean(part));
   return parts.join(", ");
 }
 
@@ -188,7 +189,7 @@ function isCommandLogLine(line: string): boolean {
 function formatFitValue(input: StatusSummaryInput): string {
   if (!input.selectedFile || !input.selectedChip) return "WAIT select file+chip";
   if (!input.chipInfo) return "WAIT load chip info";
-  if (input.chipInfo.memoryBytes === undefined) return input.advanced.allowSizeMismatch ? "OVERRIDE chip size unknown" : "BLOCKED chip size unknown";
+  if (input.chipInfo.memoryBytes === undefined) return "BLOCKED chip size unknown";
   if (/\.(hex|srec)$/i.test(input.selectedFile.name)) return "CHECK structured image normalized on confirm";
   if (input.selectedFile.size === input.chipInfo.memoryBytes) return `OK ${formatBytes(input.selectedFile.size)}`;
 
@@ -275,6 +276,7 @@ function truncateEnd(value: string, width: number): string {
 
 function formatDangerousOptions(options: AdvancedOptions): string[] {
   return [
+    options.unprotectBefore ? "write protection disabled" : undefined,
     options.allowSizeMismatch ? "size mismatch allowed" : undefined,
     options.disableReadbackCompare ? "readback compare off" : undefined,
     options.skipVerify ? "verify skipped" : undefined,

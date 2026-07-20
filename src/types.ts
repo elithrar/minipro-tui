@@ -1,15 +1,9 @@
-export type ProgrammerKind = "tl866a" | "tl866ii" | "t48" | "t56";
+export type ProgrammerKind = "t48" | "t56";
 
 export type ProgrammerStatus = {
   connected: boolean;
   model?: string;
   kind?: ProgrammerKind;
-  raw: string;
-};
-
-export type ProgrammerDatabase = {
-  kind: ProgrammerKind;
-  label: string;
   raw: string;
 };
 
@@ -33,27 +27,18 @@ export type FileTreeEntry = FileEntry | DirectoryEntry;
 
 export type ChipInfo = {
   name: string;
-  availableOn?: string;
+  aliases?: string[];
   memoryBytes?: number;
   packageName?: string;
-  vpp?: string;
-  vdd?: string;
-  vcc?: string;
-  pulseDelay?: string;
-  icsp?: string;
-  protocol?: string;
-  readBufferSize?: number;
-  writeBufferSize?: number;
+  packagePins?: number;
+  blankValue?: number;
+  canErase?: boolean;
+  supportsUnprotect?: boolean;
+  supportsProtect?: boolean;
+  supportsPinCheck?: boolean;
+  supportsT48?: boolean;
+  supportsT56?: boolean;
   raw: string;
-};
-
-export type MiniproResult = {
-  command: string[];
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  durationMs: number;
-  aborted?: boolean;
 };
 
 export type JobState =
@@ -63,16 +48,7 @@ export type JobState =
   | { kind: "done"; message: string };
 
 export type AdvancedOptions = {
-  memoryType?: "code" | "data" | "config" | "user" | "calibration";
-  fileFormat?: "ihex" | "srec";
-  vpp?: string;
-  vdd?: string;
-  vcc?: string;
-  pulseDelay?: string;
-  spiSpeed?: string;
-  unprotect?: boolean;
-  icspVcc?: boolean;
-  icspNoVcc?: boolean;
+  unprotectBefore?: boolean;
   skipErase?: boolean;
   skipVerify?: boolean;
   allowSizeMismatch?: boolean;

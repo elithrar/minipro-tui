@@ -181,20 +181,19 @@ test("chip labels include useful database metadata", () => {
       name: "M27C64A@DIP28",
       memoryBytes: 8192,
       packageName: "DIP28",
-      vcc: "5V",
-      vpp: "12V",
-      pulseDelay: "1000us",
+      canErase: true,
       raw: "Name: M27C64A@DIP28",
     }),
-  ).toEqual({ name: "M27C64A@DIP28 (5V, 28 pin DIP, 1000us)", description: "", value: "M27C64A@DIP28" });
+  ).toEqual({ name: "M27C64A@DIP28 (28 pin DIP, erasable)", description: "", value: "M27C64A@DIP28" });
   expect(formatChipLabel("AT28C64B")).toEqual({ name: "AT28C64B (default)", description: "default", value: "AT28C64B" });
+  expect(formatChipLabel("AT28C64B@DIP28")).toEqual({ name: "AT28C64B@DIP28 (default)", description: "default", value: "AT28C64B@DIP28" });
 });
 
-test("log formatting strips terminal escape sequences and bolds commands", () => {
+test("log formatting strips terminal escape sequences and bolds operation traces", () => {
   expect(sanitizeLogLine("\u001b[KReading Code... 12\r")).toBe("Reading Code... 12");
 
-  const content = formatLogContent(['$ ["minipro","-Q"]', "exit 0 in 25ms"]);
-  expect(content.chunks[0]?.text).toBe('$ ["minipro","-Q"]\n');
+  const content = formatLogContent(["$ direct USB operation", "done in 25ms"]);
+  expect(content.chunks[0]?.text).toBe("$ direct USB operation\n");
   expect(content.chunks[0]?.attributes).toBe(TextAttributes.BOLD);
   expect(content.chunks[0]?.bg?.toInts()).toEqual([40, 40, 40, 255]);
   expect(content.chunks[0]?.fg?.toInts()).toEqual([250, 178, 131, 255]);
