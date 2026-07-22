@@ -1,0 +1,31 @@
+name: Refresh xgecu lockfile
+
+on:
+  push:
+    branches:
+      - xgecu-backend
+    paths:
+      - .github/workflows/refresh-xgecu-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Refresh dependency
+        run: |
+          node -e "const fs = require('fs'); const pkg = require('./package.json'); pkg.dependencies['xgecu-web'] = 'github:elithrar/xgecu-web#main'; fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');"
+          bun install
+      - name: Commit lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json bun.lock
+          git commit -m "refresh xgecu dependency"
+          git push
