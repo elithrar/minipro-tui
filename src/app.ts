@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 
 import {
@@ -22,23 +21,12 @@ import {
   type SelectOption,
 } from "@opentui/core";
 
-import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerDatabase, ProgrammerKind, ProgrammerStatus } from "./types";
+import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerKind, ProgrammerStatus } from "./types";
 import { sha256Bytes } from "./files/hash";
 import { MAX_IMAGE_FILE_BYTES, normalizeImageBytes } from "./files/image";
 import { isFileEntry, scanFileTree } from "./files/scan";
-import {
-  buildBlankCheckArgs,
-  buildDefaultWritePreview,
-  buildDetectProgrammerArgs,
-  buildPinCheckArgs,
-  buildVerifyArgs,
-  buildSearchChipsArgs,
-  buildChipInfoArgs,
-  buildReadArgs,
-  runMinipro,
-} from "./minipro/commands";
-import { parseChipInfo, parseChipSearch, parseProgrammerDatabases, parseProgrammerStatus } from "./minipro/parse";
-import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type DestinationSnapshot } from "./minipro/workflow";
+import type { ProgrammerBackend, ReadOptions } from "./xgecu/backend";
+import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type DestinationSnapshot } from "./xgecu/workflow";
 import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings } from "./safety/options";
 import { loadState, saveState, type PersistedState } from "./state";
 import { DialogController } from "./tui/dialogs";
@@ -60,8 +48,6 @@ const CHROME_FG = RGBA.fromHex(TEXT);
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
-const CHIP_INFO_PREFETCH_LIMIT = 12;
-const CHIP_INFO_PREFETCH_CONCURRENCY = 3;
 const RECENT_LIMIT = 8;
 const LOG_LINE_LIMIT = 2000;
 const COMPACT_WIDTH = 90;
@@ -73,7 +59,8 @@ type ChipSearchState = { requestId: number; query: string; phase: "results" | "d
 
 export type MiniproTuiAppOptions = {
   renderer?: CliRenderer;
-  commandRunner?: typeof runMinipro;
+  backend?: ProgrammerBackend;
+  backendFactory?: () => Promise<ProgrammerBackend>;
   persistence?: boolean;
   exit?: (code: number) => void;
 };
@@ -101,8 +88,8 @@ type Components = {
 export class MiniproTuiApp {
   private renderer: CliRenderer | undefined;
   private components: Components | undefined;
+  private backend: ProgrammerBackend | undefined;
   private programmerStatus: ProgrammerStatus = { connected: false, raw: "" };
-  private programmerDatabases: ProgrammerDatabase[] = [];
   private database: ProgrammerKind = DEFAULT_DATABASE;
   private fileTreeEntries: FileTreeEntry[] = [];
   private files: FileEntry[] = [];
@@ -137,8 +124,6 @@ export class MiniproTuiApp {
   private activeAbortController: AbortController | undefined;
   private activeCommandCancellable = false;
   private operationPending = false;
-  private readonly activeCommandControllers = new Set<AbortController>();
-  private readonly activeCommandPromises = new Set<Promise<unknown>>();
   private compactMode = false;
   private compactPanel: CompactPanel = "files";
   private modalOriginPanel: CompactPanel | undefined;
@@ -184,6 +169,7 @@ export class MiniproTuiApp {
       consoleMode: "disabled",
       backgroundColor: BG,
     });
+    this.backend = this.options.backend ?? await (this.options.backendFactory ?? createDefaultBackend)();
     this.components = this.createLayout(this.renderer);
     this.bindKeys(this.renderer, this.components);
     this.applyResponsiveLayout();
@@ -428,10 +414,10 @@ export class MiniproTuiApp {
           void this.pickProgrammerDatabase();
           break;
         case "c":
-          this.startOperation(() => this.singleChipAction("pin/contact check", buildPinCheckArgs));
+          this.startOperation(() => this.pinCheck());
           break;
         case "b":
-          this.startOperation(() => this.singleChipAction("blank check", buildBlankCheckArgs));
+          this.startOperation(() => this.blankCheck());
           break;
         case "v":
           this.startOperation(() => this.verifySelectedFile());
@@ -503,14 +489,7 @@ export class MiniproTuiApp {
     try {
       await this.refreshFiles();
 
-      const databases = await this.executeCommand(["-Q"], { onLog: (line) => this.appendLog(line) });
-      this.programmerDatabases = parseProgrammerDatabases(commandText(databases));
-      if (this.programmerDatabases.length > 0) {
-        this.appendLog(`Available programmer databases: ${this.programmerDatabases.map((db) => db.kind).join(", ")}`);
-      }
-
-      const status = await this.executeCommand(["-k"], { onLog: (line) => this.appendLog(line) });
-      this.programmerStatus = status.exitCode === 0 ? parseProgrammerStatus(`${status.stdout}\n${status.stderr}`) : { connected: false, raw: `${status.stdout}\n${status.stderr}` };
+      this.programmerStatus = await this.requireBackend().getStatus();
       if (this.programmerStatus.kind && this.programmerStatus.kind !== this.database) {
         this.database = this.programmerStatus.kind;
         this.chipInfoCache.clear();
@@ -550,22 +529,17 @@ export class MiniproTuiApp {
     this.appendLog(`Searching ${database} database for ${query}.`);
     this.render();
     try {
-      const result = await this.executeCommand(buildSearchChipsArgs(database, query), { onLog: (line) => this.appendLog(line), signal: controller.signal });
+      const devices = this.requireBackend().listDevices(query, database);
       if (!this.isCurrentChipSearch(requestId, database, query)) return;
-      if (result.exitCode !== 0) {
-        this.chipResults = [];
-        this.showNotice(`Chip search failed for ${query}.`, "error");
-        return;
-      }
-      this.chipResults = orderChipResults(parseChipSearch(result.stdout), query);
+      for (const info of devices) this.chipInfoCache.set(info.name, info);
+      this.chipResults = orderChipResults(devices.map((device) => device.name), query);
       this.chipSearch = { requestId, query, phase: "details" };
       if (focusResults) components.chips.focus();
       this.render();
 
-      await this.prefetchChipInfo(this.chipResults.slice(0, CHIP_INFO_PREFETCH_LIMIT), database, controller.signal);
-      if (!this.isCurrentChipSearch(requestId, database, query)) return;
-
-      const defaultChip = preferDefault && !this.selectedChip ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY) : undefined;
+      const defaultChip = preferDefault && !this.selectedChip
+        ? this.chipResults.find((chip) => chip === DEFAULT_CHIP_QUERY || chip.startsWith(`${DEFAULT_CHIP_QUERY}@`))
+        : undefined;
       if (defaultChip) await this.selectChip(defaultChip);
     } finally {
       if (this.chipSearch?.requestId === requestId) {
@@ -632,44 +606,22 @@ export class MiniproTuiApp {
     this.queueStateSave();
     this.appendLog(`Loading chip info for ${chip}.`);
     this.render();
-    const result = await this.executeCommand(buildChipInfoArgs(database, chip), { onLog: (line) => this.appendLog(line) });
+    const info = this.requireBackend().resolveDevice(chip, database);
     if (requestId !== this.chipInfoRequestId || this.database !== database || this.selectedChip !== chip) return;
-    const output = commandText(result);
-    if (result.exitCode !== 0 || !output.trim()) {
+    if (!info) {
       this.appendLog(`Could not load chip info for ${chip}.`);
       this.chipInfo = undefined;
       this.render();
       return;
     }
-    this.chipInfo = parseChipInfo(output);
-    if (!this.chipInfo.name) this.chipInfo.name = chip;
-    if (this.chipInfo.raw.trim()) this.chipInfoCache.set(chip, this.chipInfo);
+    this.chipInfo = info;
+    this.chipInfoCache.set(chip, info);
     this.render();
-  }
-
-  private async prefetchChipInfo(chips: string[], database: ProgrammerKind, signal: AbortSignal): Promise<void> {
-    const missing = chips.filter((chip) => !this.chipInfoCache.has(chip));
-    await Promise.all(
-      Array.from({ length: Math.min(CHIP_INFO_PREFETCH_CONCURRENCY, missing.length) }, async () => {
-        for (;;) {
-          const chip = missing.shift();
-          if (!chip || signal.aborted) return;
-          const result = await this.executeCommand(buildChipInfoArgs(database, chip), { signal });
-          if (this.database !== database || signal.aborted) return;
-          const output = commandText(result);
-          if (result.exitCode !== 0 || !output.trim()) continue;
-          const info = parseChipInfo(output);
-          if (!info.name) info.name = chip;
-          this.chipInfoCache.set(chip, info);
-        }
-      }),
-    );
   }
 
   private async pickProgrammerDatabase(): Promise<void> {
     if (this.job.kind === "running") return;
-    const fallbackKinds: ProgrammerKind[] = ["tl866a", "tl866ii", "t48", "t56"];
-    const kinds = this.programmerDatabases.length > 0 ? this.programmerDatabases.map((db) => db.kind) : fallbackKinds;
+    const kinds: ProgrammerKind[] = ["t48", "t56"];
     const orderedKinds = orderByRecents(kinds, this.recentDatabases);
     const choice = await this.dialogs.select(
       "Programmer Database",
@@ -677,7 +629,7 @@ export class MiniproTuiApp {
       orderedKinds.indexOf(this.database),
     );
     if (!choice || !isProgrammerKind(String(choice.value))) return;
-    this.database = String(choice.value) as ProgrammerKind;
+    this.database = choice.value;
     this.recentDatabases = rememberRecent(this.recentDatabases, this.database);
     this.queueStateSave();
     this.chipInfoCache.clear();
@@ -687,13 +639,22 @@ export class MiniproTuiApp {
     await this.searchChip(this.chipQuery || DEFAULT_CHIP_QUERY, true);
   }
 
-  private async singleChipAction(step: string, buildArgs: (chip: string, options?: AdvancedOptions) => string[]): Promise<void> {
-    if (this.job.kind === "running") return;
-    if (!this.selectedChip) {
-      this.showNotice(`Select a chip before running ${step}.`, "error");
-      return;
-    }
-    await this.runConnectedAction(step, buildArgs(this.selectedChip, this.advanced));
+  private async pinCheck(): Promise<void> {
+    if (!this.selectedChip || !this.chipInfo) return this.showNotice("Select a chip before running pin/contact check.", "error");
+    if (!this.chipInfo.supportsPinCheck || this.database !== "t48") return this.showNotice("Pin/contact check is unavailable for this chip and programmer.", "error");
+    await this.runConnectedAction("pin/contact check", (options) => this.requireBackend().checkPinContacts(options).then((result) => {
+      if (!result.passed) throw new Error(`Pin/contact check failed on pin${result.badPins.length === 1 ? "" : "s"} ${result.badPins.join(", ")}.`);
+    }));
+  }
+
+  private async blankCheck(): Promise<void> {
+    if (!this.selectedChip || !this.chipInfo) return this.showNotice("Select a chip before running blank check.", "error");
+    const info = this.chipInfo;
+    await this.runConnectedAction("blank check", async (options) => {
+      const bytes = await this.requireBackend().readROM(options);
+      const firstNonblank = bytes.findIndex((byte) => byte !== (info.blankValue ?? 0xff));
+      if (firstNonblank !== -1) throw new Error(`Blank check failed at offset ${firstNonblank}.`);
+    });
   }
 
   private async verifySelectedFile(): Promise<void> {
@@ -712,46 +673,30 @@ export class MiniproTuiApp {
       return;
     }
 
-    let tempDirectory: string | undefined;
-    try {
-      tempDirectory = await mkdtemp(join(tmpdir(), "minipro-tui-verify-"));
-      const verifyPath = join(tempDirectory, `${basename(this.selectedFile.path)}.confirmed.bin`);
-      await writeFile(verifyPath, frozen.bytes);
-      this.appendLog(`Verifying confirmed bytes: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}.`);
-      await this.runConnectedAction("verify", buildVerifyArgs(this.selectedChip, verifyPath, this.advanced));
-    } catch (error) {
-      this.setJob({ kind: "failed", step: "verify", message: error instanceof Error ? error.message : String(error) });
-    } finally {
-      if (tempDirectory) await rm(tempDirectory, { recursive: true, force: true });
-    }
+    this.appendLog(`Verifying confirmed bytes: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}.`);
+    await this.runConnectedAction("verify", async (options) => {
+      const readback = await this.requireBackend().readROM(options);
+      if (!bytesEqual(frozen.bytes, readback)) throw new Error(`Verify failed. Image sha256 ${frozen.sha256}, chip sha256 ${sha256Bytes(readback)}.`);
+    });
   }
 
-  private async runConnectedAction(step: string, args: string[]): Promise<void> {
-    this.setJob({ kind: "running", step: "detect programmer" });
-    const detected = await this.runCommand(buildDetectProgrammerArgs(), true);
-    const status = parseProgrammerStatus(`${detected.stdout}\n${detected.stderr}`);
-    this.programmerStatus = status;
-    if (detected.exitCode !== 0 || !status.connected) {
-      this.setJob({ kind: "failed", step: "detect programmer", message: "No connected programmer detected." });
-      return;
-    }
-
+  private async runConnectedAction(step: string, action: (options: ReadOptions) => Promise<void>): Promise<void> {
     this.setJob({ kind: "running", step });
-    const result = await this.runCommand(args, true);
-    if (step === "pin/contact check" && isPinCheckUnsupported(commandText(result))) {
-      this.setJob({ kind: "failed", step, message: "Pin/contact check is not supported for this programmer and chip." });
-      return;
+    try {
+      await this.runBackendAction(true, (signal) => action(this.readOptions(signal)));
+      this.setJob({ kind: "done", message: `${step} completed.` });
+    } catch (error) {
+      this.setJob({ kind: "failed", step, message: error instanceof Error ? error.message : String(error) });
     }
-    this.setJob(result.exitCode === 0 ? { kind: "done", message: `${step} completed.` } : { kind: "failed", step, message: result.stderr || result.stdout });
   }
 
-  private async runCommand(args: string[], cancellable: boolean) {
+  private async runBackendAction<T>(cancellable: boolean, action: (signal: AbortSignal) => Promise<T>): Promise<T> {
     const controller = new AbortController();
     this.activeAbortController = controller;
     this.activeCommandCancellable = cancellable;
     this.render();
     try {
-      return await this.executeCommand(args, { onLog: (line) => this.appendLog(line), signal: controller.signal });
+      return await action(controller.signal);
     } finally {
       if (this.activeAbortController === controller) {
         this.activeAbortController = undefined;
@@ -809,9 +754,7 @@ export class MiniproTuiApp {
       return;
     }
 
-    const preview = buildDefaultWritePreview(selectedChip, selectedFile.path, database, advanced, backupFile)
-      .map((args) => JSON.stringify(["minipro", ...args]))
-      .join("\n");
+    const preview = formatWritePreview(chipInfo, advanced, Boolean(backupFile));
     const confirmed = await this.dialogs.confirm(
       "Write Chip",
       [
@@ -830,23 +773,17 @@ export class MiniproTuiApp {
     }
 
     this.setJob({ kind: "running", step: "write flow" });
-    const result = await runDefaultWriteWorkflow({
-      file: selectedFile,
-      chip: selectedChip,
-      chipInfo,
-      programmerKind: database,
-      confirmed: true,
-      confirmedBytes: frozen.bytes,
-      confirmedSha256: frozen.sha256,
-      backupFile,
-      backupDestinationSnapshot,
-      advanced,
-      runCommand: (args, step) => {
+    const result = await this.runBackendAction(true, (signal) => runDefaultWriteWorkflow({
+      backend: this.requireBackend(), file: selectedFile, chip: selectedChip, chipInfo, programmerKind: database,
+      confirmed: true, confirmedBytes: frozen.bytes, confirmedSha256: frozen.sha256,
+      backupFile, backupDestinationSnapshot, advanced, signal,
+      onStep: (step, cancellable) => {
         this.setJob({ kind: "running", step });
-        return this.runCommand(args, step !== "erase" && step !== "write");
+        this.activeCommandCancellable = cancellable;
+        this.render();
       },
       onLog: (line) => this.appendLog(line),
-    }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
+    })).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
 
     this.appendLog(result.message);
     this.setJob(result.ok ? { kind: "done", message: result.message } : { kind: "failed", step: "write flow", message: result.message });
@@ -883,7 +820,7 @@ export class MiniproTuiApp {
 
     const confirmed = await this.dialogs.confirm(
       "Read Chip",
-      [`Read ${selectedChip} to:`, outputFile, "", JSON.stringify(["minipro", ...buildReadArgs(selectedChip, outputFile, advanced)]), "", ...dangerousOptionWarnings(advanced)].join("\n"),
+      [`Read ${selectedChip} directly over USB to:`, outputFile, "", ...dangerousOptionWarnings(advanced)].join("\n"),
       "Read",
     );
     if (!confirmed) {
@@ -892,18 +829,12 @@ export class MiniproTuiApp {
     }
 
     this.setJob({ kind: "running", step: "read" });
-    const result = await runReadWorkflow({
-      chip: selectedChip,
-      outputFile,
-      destinationSnapshot,
-      confirmed: true,
-      advanced,
-      runCommand: (args, step) => {
-        this.setJob({ kind: "running", step });
-        return this.runCommand(args, true);
-      },
+    const result = await this.runBackendAction(true, (signal) => runReadWorkflow({
+      backend: this.requireBackend(), chip: selectedChip, programmerKind: this.database,
+      outputFile, destinationSnapshot, confirmed: true, advanced, signal,
+      onStep: (step, cancellable) => { this.setJob({ kind: "running", step }); this.activeCommandCancellable = cancellable; },
       onLog: (line) => this.appendLog(line),
-    }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
+    })).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
 
     this.appendLog(result.message);
     this.setJob(result.ok ? { kind: "done", message: result.message } : { kind: "failed", step: "read", message: result.message });
@@ -936,7 +867,7 @@ export class MiniproTuiApp {
         `Compare ${basename(selectedFile.path)} with the current contents of ${selectedChip}.`,
         `Local file: ${frozen.bytes.byteLength} B sha256 ${frozen.sha256}`,
         "",
-        JSON.stringify(["minipro", ...buildReadArgs(selectedChip, "<temp-compare-readback-file>", advanced)]),
+        "Read the chip directly over USB, then compare every byte.",
         "",
         ...dangerousOptionWarnings(advanced),
       ].join("\n"),
@@ -948,19 +879,13 @@ export class MiniproTuiApp {
     }
 
     this.setJob({ kind: "running", step: "compare" });
-    const result = await runCompareWorkflow({
-      file: selectedFile,
-      chip: selectedChip,
-      confirmed: true,
-      confirmedBytes: frozen.bytes,
-      confirmedSha256: frozen.sha256,
-      advanced,
-      runCommand: (args, step) => {
-        this.setJob({ kind: "running", step });
-        return this.runCommand(args, true);
-      },
+    const result = await this.runBackendAction(true, (signal) => runCompareWorkflow({
+      backend: this.requireBackend(), file: selectedFile, chip: selectedChip, programmerKind: this.database,
+      confirmed: true, confirmedBytes: frozen.bytes, confirmedSha256: frozen.sha256,
+      advanced, signal,
+      onStep: (step, cancellable) => { this.setJob({ kind: "running", step }); this.activeCommandCancellable = cancellable; },
       onLog: (line) => this.appendLog(line),
-    }).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
+    })).catch((error) => ({ ok: false as const, message: error instanceof Error ? error.message : String(error), steps: [] }));
 
     this.appendLog(result.message);
     this.setJob(result.ok ? { kind: "done", message: result.message } : { kind: "failed", step: "compare", message: result.message });
@@ -971,6 +896,7 @@ export class MiniproTuiApp {
     const choice = await this.dialogs.select("Advanced Controls", [
       { name: `Show all files: ${this.showAllFiles ? "on" : "off"}`, description: "Toggle current-folder file filter", value: "all" },
       { name: `Pre-write backup: ${this.advanced.backupBeforeWrite ? "on" : "off"}`, description: "Read the current chip to a chosen file before erase", value: "backup" },
+      { name: `Disable write protection: ${this.advanced.unprotectBefore ? "on" : "off"}`, description: "Dangerous: disable protection before programming", value: "u" },
       { name: `Allow size mismatch: ${this.advanced.allowSizeMismatch ? "on" : "off"}`, description: "Dangerous: permits file/chip size mismatch", value: "s" },
       { name: `Disable readback compare: ${this.advanced.disableReadbackCompare ? "on" : "off"}`, description: "Dangerous: skips post-write byte compare", value: "r" },
       { name: `Skip explicit erase: ${this.advanced.skipErase ? "on" : "off"}`, description: "Only proceeds if the chip already passes blank check", value: "e" },
@@ -989,6 +915,9 @@ export class MiniproTuiApp {
         break;
       case "backup":
         this.advanced.backupBeforeWrite = !this.advanced.backupBeforeWrite;
+        break;
+      case "u":
+        this.advanced.unprotectBefore = !this.advanced.unprotectBefore;
         break;
       case "r":
         this.advanced.disableReadbackCompare = !this.advanced.disableReadbackCompare;
@@ -1059,8 +988,8 @@ export class MiniproTuiApp {
     this.shuttingDown = true;
     this.chipSearchRequestId++;
     this.chipInfoRequestId++;
-    for (const controller of this.activeCommandControllers) controller.abort();
-    await Promise.allSettled([...this.activeCommandPromises]);
+    this.chipSearchAbortController?.abort();
+    await this.backend?.close();
     this.queueStateSave();
     await this.stateSave;
     this.renderer?.destroy();
@@ -1384,23 +1313,6 @@ export class MiniproTuiApp {
       });
   }
 
-  private async executeCommand(args: string[], options: Parameters<typeof runMinipro>[1] = {}) {
-    const controller = new AbortController();
-    const forwardAbort = () => controller.abort();
-    options.signal?.addEventListener("abort", forwardAbort, { once: true });
-    if (options.signal?.aborted) controller.abort();
-    this.activeCommandControllers.add(controller);
-    const promise = Promise.resolve().then(() => (this.options.commandRunner ?? runMinipro)(args, { ...options, signal: controller.signal }));
-    this.activeCommandPromises.add(promise);
-    try {
-      return await promise;
-    } finally {
-      options.signal?.removeEventListener("abort", forwardAbort);
-      this.activeCommandControllers.delete(controller);
-      this.activeCommandPromises.delete(promise);
-    }
-  }
-
   private requireRenderer(): CliRenderer {
     if (!this.renderer) throw new Error("Renderer is not initialized.");
     return this.renderer;
@@ -1409,6 +1321,22 @@ export class MiniproTuiApp {
   private requireComponents(): Components {
     if (!this.components) throw new Error("Components are not initialized.");
     return this.components;
+  }
+
+  private requireBackend(): ProgrammerBackend {
+    if (!this.backend) throw new Error("Programmer backend is not initialized.");
+    return this.backend;
+  }
+
+  private readOptions(signal?: AbortSignal): ReadOptions {
+    if (!this.selectedChip) throw new Error("No chip is selected.");
+    return {
+      chip: this.selectedChip,
+      programmerKind: this.database,
+      skipIdCheck: this.advanced.skipIdRead,
+      continueOnIdMismatch: this.advanced.ignoreIdMismatch,
+      signal,
+    };
   }
 
   private captureFocusedControl(): (() => void) | undefined {
@@ -1707,7 +1635,28 @@ function panelShortcut(id: string): string | undefined {
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {
-  return value === "tl866a" || value === "tl866ii" || value === "t48" || value === "t56";
+  return value === "t48" || value === "t56";
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+}
+
+async function createDefaultBackend(): Promise<ProgrammerBackend> {
+  const { createXgecuBackend } = await import("./xgecu/direct");
+  return createXgecuBackend();
+}
+
+function formatWritePreview(chip: ChipInfo, advanced: AdvancedOptions, backup: boolean): string {
+  return [
+    backup ? "1. Read and save a pre-write backup." : undefined,
+    chip.supportsPinCheck ? "1. Check pin contacts." : undefined,
+    advanced.unprotectBefore ? "Disable supported software write protection before programming." : undefined,
+    `2. ${chip.canErase && !advanced.skipErase ? "Erase, then blank-check" : "Blank-check"} the chip.`,
+    "3. Write the frozen image bytes.",
+    advanced.skipVerify ? undefined : "4. Verify through the xgecu backend.",
+    advanced.disableReadbackCompare ? undefined : "5. Read back and compare every byte independently.",
+  ].filter((line): line is string => Boolean(line)).join("\n");
 }
 
 function isCompactPanel(value: unknown): value is CompactPanel {
@@ -1725,14 +1674,6 @@ function isEscapeKey(key: KeyEvent): boolean {
 function consumeKey(key: KeyEvent): void {
   key.preventDefault();
   key.stopPropagation();
-}
-
-function commandText(result: { stdout: string; stderr: string }): string {
-  return [result.stdout, result.stderr].filter(Boolean).join("\n");
-}
-
-function isPinCheckUnsupported(output: string): boolean {
-  return /pin test is not supported|pin.*check.*not supported/i.test(output);
 }
 
 function defaultReadFilename(chip: string): string {

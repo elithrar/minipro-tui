@@ -1,405 +1,165 @@
+import { expect, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { expect, test } from "bun:test";
+import type { FileEntry } from "../src/types";
+import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow } from "../src/xgecu/workflow";
+import { FakeBackend, TEST_CHIP } from "./support/fake-backend";
 
-import type { FileEntry, MiniproResult } from "../src/types";
-import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type WorkflowCommandRunner } from "../src/minipro/workflow";
+const tempDirectory = join(import.meta.dir, ".tmp-workflow");
 
-test("default flow includes pin check, erase, blank check, write, verify, and readback compare", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, "image.bin");
+test("write flow preserves the direct backend safety sequence", async () => {
+  const backend = new FakeBackend();
+  backend.contents = new Uint8Array([9, 8, 7, 6]);
   const bytes = new Uint8Array([1, 2, 3, 4]);
-  await writeFile(path, bytes);
-  const calls: string[][] = [];
-  const runCommand: WorkflowCommandRunner = async (args) => {
-    calls.push(args);
-    return ok(args, args[0] === "-k" ? "T48" : "");
-  };
-
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry(path, 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: bytes,
-    runCommand,
-    readFileBytes: async () => bytes,
-  });
-
-  expect(result.ok).toBe(true);
-  if (!result.readbackPath) throw new Error("Expected readback path.");
-  const writePath = calls[5]?.[3];
-  const verifyPath = calls[6]?.[3];
-  if (!writePath || !verifyPath) throw new Error("Expected temp write and verify paths.");
-  expect(writePath).toEndWith("image.bin.confirmed.bin");
-  expect(writePath).not.toBe(path);
-  expect(verifyPath).toBe(writePath);
-  expect(calls).toEqual([
-    ["-k"],
-    ["-q", "T48", "-d", "AT28C64B"],
-    ["-p", "AT28C64B", "-z"],
-    ["-p", "AT28C64B", "-E"],
-    ["-p", "AT28C64B", "-b"],
-    ["-p", "AT28C64B", "-w", writePath, "--unprotect"],
-    ["-p", "AT28C64B", "-m", writePath],
-    ["-p", "AT28C64B", "-r", result.readbackPath, "-c", "code"],
-  ]);
-});
-
-test("default flow blocks on missing file", async () => {
-  const result = await runDefaultWriteWorkflow({ chip: "AT28C64B", chipInfo: { name: "AT28C64B", raw: "" }, programmerKind: "t48", confirmed: true, runCommand: async (args) => ok(args) });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("Select a file");
-});
-
-test("default flow blocks on missing chip", async () => {
-  const result = await runDefaultWriteWorkflow({ file: fileEntry("image.bin", 4), chipInfo: { name: "AT28C64B", raw: "" }, programmerKind: "t48", confirmed: true, runCommand: async (args) => ok(args) });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("Select a chip");
-});
-
-test("default flow blocks on known size mismatch", async () => {
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 8, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
-    runCommand: async (args) => ok(args),
-  });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("does not match");
-});
-
-test("default flow allows size mismatch only when explicit override is enabled", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, "override.bin");
-  const bytes = new Uint8Array([1, 2, 3, 4]);
-  await writeFile(path, bytes);
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry(path, 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 8, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    advanced: { allowSizeMismatch: true },
-    confirmedBytes: bytes,
-    runCommand: async (args) => ok(args, args[0] === "-k" ? "T48" : args.includes("-d") ? "Name: AT28C64B\nMemory: 8 Bytes" : ""),
-    readFileBytes: async () => bytes,
-  });
-  expect(result.ok).toBe(true);
-});
-
-test("workflow stops after a failed step", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, "fail.bin");
-  await writeFile(path, new Uint8Array([1, 2, 3, 4]));
-  const calls: string[][] = [];
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry(path, 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
-    runCommand: async (args) => {
-      calls.push(args);
-      if (args.includes("-z")) return { ...ok(args), exitCode: 1, stderr: "pin fail" };
-      return ok(args, args[0] === "-k" ? "T48" : "");
-    },
-  });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("pin/contact check failed");
-  expect(calls).toHaveLength(3);
-});
-
-test("write flow continues when the programmer reports that pin checks are unsupported", async () => {
-  const calls: string[][] = [];
-  const logs: string[] = [];
-  const bytes = new Uint8Array([1, 2, 3, 4]);
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: bytes,
-    runCommand: async (args) => {
-      calls.push(args);
-      if (args[0] === "-k") return ok(args, "T48");
-      if (args.includes("-z")) return ok(args, "Pin test is not supported");
-      return ok(args);
-    },
-    readFileBytes: async () => bytes,
-    onLog: (line) => logs.push(line),
-  });
-  expect(result.ok).toBe(true);
-  expect(logs).toContain("Pin/contact check is not supported for this programmer and chip; continuing without it.");
-  expect(calls).toHaveLength(8);
-});
-
-test("write flow also continues if an unsupported pin check exits nonzero", async () => {
-  const bytes = new Uint8Array([1, 2, 3, 4]);
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: bytes,
-    runCommand: async (args) => {
-      if (args[0] === "-k") return ok(args, "T48");
-      if (args.includes("-z")) return { ...ok(args), exitCode: 1, stderr: "Pin test is not supported." };
-      return ok(args);
-    },
-    readFileBytes: async () => bytes,
-  });
-  expect(result.ok).toBe(true);
-});
-
-test("write flow rejects a different connected programmer before chip actions", async () => {
-  const calls: string[][] = [];
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
-    runCommand: async (args) => {
-      calls.push(args);
-      return ok(args, args[0] === "-k" ? "T56" : "");
-    },
-  });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("does not match confirmed database");
-  expect(calls).toHaveLength(1);
-});
-
-test("write flow rejects an unrecognized connected programmer", async () => {
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
-    runCommand: async (args) => ok(args, args[0] === "-k" ? "Found T76" : ""),
-  });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("not recognized");
-  expect(result.steps).toHaveLength(1);
-});
-
-test("write flow revalidates live chip size before destructive steps", async () => {
-  const calls: string[][] = [];
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
-    runCommand: async (args) => {
-      calls.push(args);
-      return ok(args, args[0] === "-k" ? "T48" : args.includes("-d") ? "Name: AT28C64B\nMemory: 8 Bytes" : "");
-    },
-  });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("changed after confirmation");
-  expect(calls).toHaveLength(2);
-});
-
-test("default flow writes confirmed bytes even if the source path changes", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, "changed.bin");
-  await writeFile(path, new Uint8Array([1]));
-  const calls: string[][] = [];
-  const confirmedBytes = new Uint8Array([1, 2, 3, 4]);
-  let writtenBytes: Uint8Array | undefined;
-  const result = await runDefaultWriteWorkflow({
-    file: fileEntry(path, 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
-    programmerKind: "t48",
-    confirmed: true,
-    confirmedBytes,
-    runCommand: async (args) => {
-      calls.push(args);
-      if (args.includes("-w")) writtenBytes = await readFile(args[args.indexOf("-w") + 1]!);
-      return ok(args, args[0] === "-k" ? "T48" : "");
-    },
-    readFileBytes: async () => confirmedBytes,
-  });
-  expect(result.ok).toBe(true);
-  expect(calls.some((args) => args.includes("-w"))).toBe(true);
-  expect(writtenBytes).toEqual(Buffer.from(confirmedBytes));
-});
-
-test("optional backup completes before erase and is preserved", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const path = join(dir, "backup-write.bin");
-  const backupFile = join(dir, "original-backup.bin");
-  await rm(backupFile, { force: true });
-  const bytes = new Uint8Array([1, 2, 3, 4]);
-  const original = new Uint8Array([9, 8, 7, 6]);
-  await writeFile(path, bytes);
   const steps: string[] = [];
 
   const result = await runDefaultWriteWorkflow({
-    file: fileEntry(path, 4),
-    chip: "AT28C64B",
-    chipInfo: { name: "AT28C64B", memoryBytes: 4, raw: "" },
+    backend,
+    file: fileEntry("image.bin", 4),
+    chip: TEST_CHIP.name,
+    chipInfo: TEST_CHIP,
     programmerKind: "t48",
     confirmed: true,
     confirmedBytes: bytes,
-    backupFile,
+    onStep: (step) => steps.push(step),
+  });
+
+  expect(result.ok).toBe(true);
+  expect(backend.calls).toEqual(["pins", "write", "read"]);
+  expect(steps).toEqual(["pin/contact check", "erase, blank check, write, and verify", "independent readback compare"]);
+  expect(backend.contents).toEqual(bytes);
+});
+
+test("write flow passes safety options to xgecu and freezes input bytes", async () => {
+  const backend = new FakeBackend();
+  const confirmed = new Uint8Array([1, 2, 3, 4]);
+  let written: Uint8Array | undefined;
+  backend.onWrite = async (options) => {
+    written = options.data.slice();
+    expect(options.erase).toBe(false);
+    expect(options.verify).toBe(false);
+    expect(options.unprotectBefore).toBe(false);
+    expect(options.continueOnIdMismatch).toBe(true);
+    confirmed.fill(9);
+    backend.contents = options.data.slice();
+  };
+
+  const result = await runDefaultWriteWorkflow({
+    backend,
+    file: fileEntry("image.bin", 4),
+    chip: TEST_CHIP.name,
+    chipInfo: TEST_CHIP,
+    programmerKind: "t48",
+    confirmed: true,
+    confirmedBytes: confirmed,
+    advanced: { skipErase: true, skipVerify: true, ignoreIdMismatch: true },
+  });
+
+  expect(result.ok).toBe(true);
+  expect(written).toEqual(new Uint8Array([1, 2, 3, 4]));
+});
+
+test("write protection changes require explicit device support", async () => {
+  const backend = new FakeBackend();
+  const result = await runDefaultWriteWorkflow({
+    backend,
+    file: fileEntry("image.bin", 4),
+    chip: TEST_CHIP.name,
+    chipInfo: TEST_CHIP,
+    programmerKind: "t48",
+    confirmed: true,
+    confirmedBytes: new Uint8Array(4),
+    advanced: { unprotectBefore: true },
+  });
+  expect(result.ok).toBe(false);
+  expect(result.message).toContain("does not support disabling write protection");
+  expect(backend.calls).toEqual([]);
+});
+
+test("write flow stops on a failed pin check", async () => {
+  const backend = new FakeBackend();
+  backend.checkPinContacts = async () => {
+    backend.calls.push("pins");
+    return { passed: false, checkedPins: [1, 2], badPins: [2] };
+  };
+  const result = await runDefaultWriteWorkflow({
+    backend,
+    file: fileEntry("image.bin", 4),
+    chip: TEST_CHIP.name,
+    chipInfo: TEST_CHIP,
+    programmerKind: "t48",
+    confirmed: true,
+    confirmedBytes: new Uint8Array(4),
+  });
+  expect(result.ok).toBe(false);
+  expect(result.message).toContain("pin 2");
+  expect(backend.calls).toEqual(["pins"]);
+});
+
+test("pre-write backup is committed before mutation", async () => {
+  await mkdir(tempDirectory, { recursive: true });
+  const backup = join(tempDirectory, "backup.bin");
+  await rm(backup, { force: true });
+  const backend = new FakeBackend();
+  backend.contents = new Uint8Array([9, 8, 7, 6]);
+  const result = await runDefaultWriteWorkflow({
+    backend,
+    file: fileEntry("image.bin", 4),
+    chip: TEST_CHIP.name,
+    chipInfo: TEST_CHIP,
+    programmerKind: "t48",
+    confirmed: true,
+    confirmedBytes: new Uint8Array([1, 2, 3, 4]),
+    backupFile: backup,
     backupDestinationSnapshot: { exists: false },
-    runCommand: async (args, step) => {
-      steps.push(step);
-      if (step === "backup existing chip") await writeFile(args[args.indexOf("-r") + 1]!, original);
-      return ok(args, args[0] === "-k" ? "T48" : "");
-    },
-    readFileBytes: async () => bytes,
-  });
-
-  expect(result.ok).toBe(true);
-  expect(steps.indexOf("backup existing chip")).toBeLessThan(steps.indexOf("erase"));
-  expect(await readFile(backupFile)).toEqual(Buffer.from(original));
-});
-
-test("read workflow reads to a file and reports checksum", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const outputFile = join(dir, "read.bin");
-  await rm(outputFile, { force: true });
-  const calls: string[][] = [];
-  const result = await runReadWorkflow({
-    chip: "AT28C64B",
-    outputFile,
-    destinationSnapshot: { exists: false },
-    confirmed: true,
-    runCommand: async (args) => {
-      calls.push(args);
-      const readIndex = args.indexOf("-r");
-      if (readIndex !== -1) await writeFile(args[readIndex + 1]!, new Uint8Array([1, 2, 3, 4]));
-      return ok(args, args[0] === "-k" ? "T48" : "");
-    },
   });
   expect(result.ok).toBe(true);
-  expect(result.message).toContain("sha256");
-  expect(calls[0]).toEqual(["-k"]);
-  expect(calls[1]?.slice(0, 3)).toEqual(["-p", "AT28C64B", "-r"]);
-  expect(calls[1]?.[3]).not.toBe(outputFile);
-  expect(result.readbackPath).toBe(outputFile);
+  expect(backend.calls).toEqual(["pins", "read", "write", "read"]);
+  expect(await readFile(backup)).toEqual(Buffer.from([9, 8, 7, 6]));
 });
 
-test("read workflow requires confirmation", async () => {
-  const result = await runReadWorkflow({ chip: "AT28C64B", outputFile: "read.bin", destinationSnapshot: { exists: false }, confirmed: false, runCommand: async (args) => ok(args) });
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("Confirm read");
-});
-
-test("reads refuse to replace an existing destination", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const outputFile = join(dir, "existing.bin");
-  const original = new Uint8Array([9, 8, 7]);
-  await writeFile(outputFile, original);
-
-  const result = await runReadWorkflow({
-    chip: "AT28C64B",
-    outputFile,
-    destinationSnapshot: await captureDestination(outputFile),
-    confirmed: true,
-    runCommand: async (args) => args[0] === "-k" ? ok(args, "T48") : { ...ok(args), exitCode: 1, stderr: "read failed" },
+test("read refuses existing and raced destinations", async () => {
+  await mkdir(tempDirectory, { recursive: true });
+  const existing = join(tempDirectory, "existing.bin");
+  await writeFile(existing, new Uint8Array([9]));
+  const backend = new FakeBackend();
+  const existingResult = await runReadWorkflow({
+    backend, chip: TEST_CHIP.name, programmerKind: "t48", confirmed: true,
+    outputFile: existing, destinationSnapshot: await captureDestination(existing),
   });
+  expect(existingResult.ok).toBe(false);
+  expect(await readFile(existing)).toEqual(Buffer.from([9]));
 
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("never replaced");
-  expect(await readFile(outputFile)).toEqual(Buffer.from(original));
-});
-
-test("read refuses to replace a destination created after confirmation", async () => {
-  const dir = join(import.meta.dir, ".tmp-workflow");
-  await mkdir(dir, { recursive: true });
-  const outputFile = join(dir, "raced.bin");
-  await Bun.file(outputFile).delete().catch(() => undefined);
-  const result = await runReadWorkflow({
-    chip: "AT28C64B",
-    outputFile,
-    destinationSnapshot: { exists: false },
-    confirmed: true,
-    runCommand: async (args) => {
-      if (args[0] === "-k") return ok(args, "T48");
-      await writeFile(args[args.indexOf("-r") + 1]!, new Uint8Array([1, 2, 3]));
-      await writeFile(outputFile, new Uint8Array([9]));
-      return ok(args);
-    },
+  const raced = join(tempDirectory, "raced.bin");
+  await rm(raced, { force: true });
+  backend.onRead = async () => {
+    await writeFile(raced, new Uint8Array([7]));
+    return new Uint8Array([1, 2, 3, 4]);
+  };
+  const racedResult = await runReadWorkflow({
+    backend, chip: TEST_CHIP.name, programmerKind: "t48", confirmed: true,
+    outputFile: raced, destinationSnapshot: { exists: false },
   });
-  expect(result.ok).toBe(false);
-  expect(await readFile(outputFile)).toEqual(Buffer.from([9]));
+  expect(racedResult.ok).toBe(false);
+  expect(await readFile(raced)).toEqual(Buffer.from([7]));
 });
 
-test("compare workflow reports matched hashes", async () => {
-  const localBytes = new Uint8Array([1, 2, 3, 4]);
-  const calls: string[][] = [];
-  const result = await runCompareWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    confirmed: true,
-    confirmedBytes: localBytes,
-    runCommand: async (args) => {
-      calls.push(args);
-      return ok(args, args[0] === "-k" ? "T48" : "");
-    },
-    readFileBytes: async () => localBytes,
-  });
-
-  expect(result.ok).toBe(true);
-  if (!result.readbackPath) throw new Error("Expected compare readback path.");
-  expect(result.message).toContain("matched");
-  expect(result.message).toContain("Local sha256");
-  expect(result.message).toContain("Chip sha256");
-  expect(result.originalSha256).toBe(result.readbackSha256);
-  expect(calls).toEqual([
-    ["-k"],
-    ["-p", "AT28C64B", "-r", result.readbackPath, "-c", "code"],
-  ]);
+test("compare reports matching and mismatching readbacks", async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const backend = new FakeBackend();
+  backend.contents = bytes.slice();
+  const input = {
+    backend, file: fileEntry("image.bin", 4), chip: TEST_CHIP.name,
+    programmerKind: "t48" as const, confirmed: true, confirmedBytes: bytes,
+  };
+  expect((await runCompareWorkflow(input)).ok).toBe(true);
+  backend.contents[3] = 5;
+  const mismatch = await runCompareWorkflow(input);
+  expect(mismatch.ok).toBe(false);
+  expect(mismatch.message).toContain("Compare failed");
 });
-
-test("compare workflow reports mismatched hashes", async () => {
-  const localBytes = new Uint8Array([1, 2, 3, 4]);
-  const chipBytes = new Uint8Array([4, 3, 2, 1]);
-  const result = await runCompareWorkflow({
-    file: fileEntry("image.bin", 4),
-    chip: "AT28C64B",
-    confirmed: true,
-    confirmedBytes: localBytes,
-    runCommand: async (args) => ok(args, args[0] === "-k" ? "T48" : ""),
-    readFileBytes: async () => chipBytes,
-  });
-
-  expect(result.ok).toBe(false);
-  expect(result.message).toContain("files do not match");
-  expect(result.message).toContain("Local sha256");
-  expect(result.message).toContain("Chip sha256");
-  expect(result.originalSha256).not.toBe(result.readbackSha256);
-});
-
-function ok(command: string[], stdout = ""): MiniproResult {
-  if (!stdout && command.includes("-d")) stdout = "Name: AT28C64B\nMemory: 4 Bytes";
-  return { command: ["minipro", ...command], exitCode: 0, stdout, stderr: "", durationMs: 1 };
-}
 
 function fileEntry(path: string, size: number): FileEntry {
-  return { name: path.split("/").at(-1) ?? path, path, size, modifiedAt: new Date(), sha256Short: "abc123" };
+  return { name: path, path, size, modifiedAt: new Date(0), sha256Short: "test" };
 }

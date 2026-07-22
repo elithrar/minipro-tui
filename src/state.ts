@@ -97,5 +97,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isProgrammerKind(value: unknown): value is ProgrammerKind {
-  return value === "tl866a" || value === "tl866ii" || value === "t48" || value === "t56";
+  return value === "t48" || value === "t56";
 }

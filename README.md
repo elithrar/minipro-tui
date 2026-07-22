@@ -1,96 +1,58 @@
 # minipro-tui
 
-`minipro-tui` is a terminal UI for safer chip programming with the `minipro` CLI and OpenTUI.
+`minipro-tui` is an OpenTUI workbench for programming ROMs directly with XGecu T48 and T56 USB programmers.
 
-It scans the current directory for candidate image files, queries the live `minipro` chip database, and runs read, compare, pin check, blank check, verify, and safe write workflows without shell interpolation.
+It scans the current directory for image files and uses the xgecu-web Zig/WebAssembly backend for its device catalog, USB transport, reads, writes, pin checks, and verification. The `minipro` command-line program is not required.
 
 <img width="1000" alt="minipro TUI screenshot of the workbench" src="https://github.com/user-attachments/assets/73f3df7b-0673-413b-acb4-8b2c70c00704" />
 
 ## Requirements
 
 - Bun 1.3 or newer.
-- `minipro` on `PATH` for hardware operations.
-- An XGecu-compatible programmer supported by `minipro` for programming workflows.
+- An XGecu T48 or T56 for hardware operations.
+- OS permission to access the programmer over USB.
 
-The app does not require a programmer connected so you can inspect files and search the chip database offline. The default programmer database is `T48`, and the default chip query is `AT28C64B`.
+The app starts without connected hardware so you can inspect files and search the bundled xgecu device catalog. The defaults are the T48 catalog and `AT28C64B` chip query.
 
 ## Usage
 
-Install:
-
 ```bash
 bun install
-```
-
-Run during development:
-
-```bash
-bun run src/main.ts
-```
-
-or:
-
-```bash
 bun run dev
 ```
 
-Build a compiled executable:
+Build and test:
 
 ```bash
 bun run build
-./minipro-tui
-```
-
-Run the executable from an installed project directory so the platform-specific OpenTUI native package in `node_modules` remains available.
-
-Test:
-
-```bash
 bun test
+bunx tsc --noEmit
 ```
 
-## Default Safe Write Flow
+## Safe write flow
 
-The `w` key previews the command sequence and requires confirmation before erase or write. The default flow checks contact, writes, verifies, and readback-compares:
+Press `w` to review and confirm the write. The default workflow:
 
-```text
-minipro -k
-minipro -q <programmer> -d <chip>
-minipro -p <chip> -z
-minipro -p <chip> -E
-minipro -p <chip> -b
-minipro -p <chip> -w <confirmed-temp-file> --unprotect
-minipro -p <chip> -m <file>
-minipro -p <chip> -r <temp-readback-file> -c code
-```
+- Freezes and hashes the selected image bytes before confirmation.
+- Connects to the programmer directly over USB.
+- Checks T48 pin contacts when the selected device supports it.
+- Optionally reads, syncs, and commits a pre-write backup.
+- Runs erase, a full blank readback, write, and backend verification through xgecu-web.
+- Reads the chip again and compares every byte independently.
 
-The write command disables supported software write protection and retains Minipro's normal erase and verify behavior in addition to the workflow's explicit checks. The app never enables chip protection. It freezes the confirmed bytes, then compares the selected image and readback byte-for-byte and shows SHA-256 summaries in the log. Intel HEX and S-record images are checksum-validated and normalized to raw bytes before size checks and hardware actions.
+The mutation phase cannot be cancelled after it begins. xgecu-web always resets the programmer on operation completion or failure. Intel HEX and S-record images are checksum-validated and normalized before size checks and hardware access.
 
-Pin/contact checks run when supported; an explicit unsupported response is logged and the workflow continues. Raw operation images are limited to 64 MiB and structured source images to 4 MiB to keep file freezing and normalization bounded.
+Electrical erase is only requested for devices that support it. Nonerasable devices must already be externally erased; xgecu-web blank-checks them before programming. Size mismatches remain blocked unless the explicit override is enabled, and erase writes always require a full code-memory image.
 
-Enable `Pre-write backup` under Advanced Controls to read the selected memory region to a new file before erase. The backup is hashed, synced, and committed before the workflow can continue. Existing files are never replaced by hardware reads.
+Disabling write protection is an explicit advanced option. When enabled, the confirmation warns that protection is not restored automatically.
 
-## Read Flow
+Enable `Pre-write backup` under Advanced Controls to save the current contents before mutation. Hardware reads only create new files; existing and raced destinations are never replaced.
 
-Press `R` to read the selected chip. The app opens a confirmation dialog with an editable filename, then runs:
+## Read and compare
 
-```text
-minipro -k
-minipro -p <chip> -r <output-file> -c code
-```
+Press `R` to read the selected chip to a new file. The app hashes and syncs the bytes before completing the operation.
 
-After a successful read, the app hashes and syncs a temporary output before atomically committing a new destination. Existing destinations are refused and failed reads preserve the filesystem. Reads default to the chip's `code` memory region so multi-region devices cannot create untracked sibling files.
-
-## Compare Flow
-
-Press `m` to compare the selected local file against the current contents of the selected chip. The app freezes and hashes the local file before confirmation, reads the chip to a temporary file, hashes the readback, then shows both SHA-256 hashes in a dialog:
-
-```text
-minipro -k
-minipro -p <chip> -r <temp-compare-readback-file> -c code
-```
-
-The dialog reports `matched` when the hashes are identical and `files do not match` when they differ.
+Press `m` to freeze the selected local image, read the chip directly over USB, and compare every byte. Both hashes are reported on a mismatch.
 
 ## Keys
 
@@ -98,12 +60,8 @@ The dialog reports `matched` when the hashes are identical and `files do not mat
 q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab/shift+tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
 ```
 
-The second status line shows the next setup step, active work, and action errors. The footer changes with the focused pane so the relevant controls stay visible.
+The selected programmer, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/minipro-tui/state.json`. Overrides that weaken hardware checks reset on launch.
 
-When the footer shows `esc cancel`, Escape safely cancels the active detection, read, check, verify, or readback command. Erase and write transfers are intentionally non-cancellable. Terminals narrower than 90 columns switch to Files, Chips, Status, and Log tabs.
+## Backend
 
-The selected programmer database, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/minipro-tui/state.json`. Overrides that weaken hardware checks always reset on launch.
-
-## Credit
-
-This TUI wraps the `minipro` command-line programmer maintained by David Griffith and contributors: https://gitlab.com/DavidGriffith/minipro
+[xgecu-web](https://github.com/elithrar/xgecu-web) provides the Zig device logic, WebAssembly API, and WebUSB-compatible transport. [node-usb](https://github.com/node-usb/node-usb-rs) supplies the unrestricted USB provider used by the Bun process.

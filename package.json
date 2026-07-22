@@ -11,10 +11,12 @@
   "scripts": {
     "dev": "bun run src/main.ts",
     "test": "bun test",
-    "build": "bun build src/main.ts --target bun --compile --outfile minipro-tui --external '@opentui/core-*'"
+    "build": "bun build src/main.ts --target bun --compile --outfile minipro-tui --external '@opentui/core-*' --external usb --external xgecu-web"
   },
   "type": "module",
   "dependencies": {
-    "@opentui/core": "^0.4.3"
+    "@opentui/core": "^0.4.3",
+    "usb": "^3.0.1",
+    "xgecu-web": "github:elithrar/xgecu-web#main"
   }
 }
