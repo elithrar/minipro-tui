@@ -17,6 +17,6 @@
   "dependencies": {
     "@opentui/core": "^0.4.3",
     "usb": "^3.0.1",
-    "xgecu-web": "github:elithrar/xgecu-web#minipro-tui-backend"
+    "xgecu-web": "github:elithrar/xgecu-web#main"
   }
 }
