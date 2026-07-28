@@ -56,7 +56,7 @@ type CompactPanel = "files" | "chips" | "status" | "log";
 type Notice = { tone: "info" | "error"; message: string };
 type ChipSearchState = { requestId: number; query: string; phase: "results" | "details" };
 
-export type MiniproTuiAppOptions = {
+export type ChipDeskAppOptions = {
   renderer?: CliRenderer;
   backend?: ProgrammerBackend;
   backendFactory?: () => Promise<ProgrammerBackend>;
@@ -96,7 +96,7 @@ type Components = {
   footerText: TextRenderable;
 };
 
-export class MiniproTuiApp {
+export class ChipDeskApp {
   private renderer: CliRenderer | undefined;
   private components: Components | undefined;
   private backend: ProgrammerBackend | undefined;
@@ -139,7 +139,7 @@ export class MiniproTuiApp {
   private modalOriginPanel: CompactPanel | undefined;
   private shuttingDown = false;
   private stateSave: Promise<void> = Promise.resolve();
-  private readonly options: MiniproTuiAppOptions;
+  private readonly options: ChipDeskAppOptions;
   private readonly dialogs = new DialogController({
     getRenderer: () => this.requireRenderer(),
     theme: {
@@ -167,7 +167,7 @@ export class MiniproTuiApp {
     },
   });
 
-  constructor(options: MiniproTuiAppOptions = {}) {
+  constructor(options: ChipDeskAppOptions = {}) {
     this.options = options;
   }
 
@@ -221,7 +221,7 @@ export class MiniproTuiApp {
     });
     const brandBadge = createBadge(renderer, {
       id: "brand-badge",
-      label: "MINIPRO // EEPROM WORKBENCH",
+      label: "CHIPDESK // EEPROM WORKBENCH",
       intent: "neutral",
       height: 1,
       alignItems: "center",
@@ -229,7 +229,7 @@ export class MiniproTuiApp {
       backgroundColor: PANEL,
     });
     const compactBrandBadge = createBadge(renderer, {
-      label: "MINIPRO",
+      label: "CHIPDESK",
       intent: "neutral",
       height: 1,
       backgroundColor: PANEL,

@@ -16,9 +16,9 @@ export type PersistedState = {
 };
 
 export function stateFilePath(): string {
-  if (process.env.MINIPRO_TUI_STATE) return process.env.MINIPRO_TUI_STATE;
+  if (process.env.CHIPDESK_STATE) return process.env.CHIPDESK_STATE;
   const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(configHome, "minipro-tui", "state.json");
+  return join(configHome, "chipdesk", "state.json");
 }
 
 export async function loadState(path = stateFilePath()): Promise<PersistedState | undefined> {

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "minipro-tui",
+      "name": "chipdesk",
       "dependencies": {
         "@opentui/core": "^0.4.3",
         "@tuiparts/core": ">=0.0.1 <0.1.0",

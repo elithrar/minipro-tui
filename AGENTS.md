@@ -4,7 +4,7 @@
 
 - Install with `bun install`; this repo uses `bun.lock` and Bun 1.3+.
 - Run the app with `bun run dev` or `bun run src/main.ts`.
-- Build the standalone binary with `bun run build`; it writes `./minipro-tui` and keeps `@opentui/core-*` external for native OpenTUI packages.
+- Build the standalone binary with `bun run build`; it writes `./chipdesk` and keeps `@opentui/core-*` external for native OpenTUI packages.
 - Run all tests with `bun test`.
 - Run a focused test file with `bun test test/workflow.test.ts`.
 - Type-check with `bunx tsc --noEmit`; there is no package script for it.

@@ -2,18 +2,18 @@ import { expect, test } from "bun:test";
 import { BoxRenderable, InputRenderable, SelectRenderable, TabSelectRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 
-import { MiniproTuiApp } from "../src/app";
+import { ChipDeskApp } from "../src/app";
 import { FakeBackend } from "./support/fake-backend";
 
 test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 });
   const backend = new FakeBackend();
-  const app = new MiniproTuiApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
+  const app = new ChipDeskApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
   await app.start();
   await setup.flush();
 
   const desktop = setup.captureCharFrame();
-  expect(desktop).toContain("MINIPRO");
+  expect(desktop).toContain("CHIPDESK");
   expect(desktop).toContain("01 IMAGE");
   expect(desktop).toContain("02 DEVICE CATALOG");
   expect(desktop).toContain("03 WRITE RECEIPT");
@@ -39,7 +39,7 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   setup.resize(50, 24);
   await setup.flush();
   const narrow = setup.captureCharFrame();
-  expect(narrow).toContain("MINIPRO");
+  expect(narrow).toContain("CHIPDESK");
   expect(narrow).not.toContain("DIRECT USB");
   expect(narrow).toContain("IDLE  //  CHIP RESULTS");
 
@@ -51,7 +51,7 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
 
 test("search fields release focus through Escape and outside clicks", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 });
-  const app = new MiniproTuiApp({ renderer: setup.renderer, backend: new FakeBackend(), persistence: false, exit: () => undefined });
+  const app = new ChipDeskApp({ renderer: setup.renderer, backend: new FakeBackend(), persistence: false, exit: () => undefined });
   await app.start();
   await setup.flush();
 
@@ -78,7 +78,7 @@ test("search fields release focus through Escape and outside clicks", async () =
 test("unavailable actions surface an error without touching USB", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 });
   const backend = new FakeBackend();
-  const app = new MiniproTuiApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
+  const app = new ChipDeskApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
   await app.start();
   await setup.flush();
   const files = setup.renderer.root.findDescendantById("files") as SelectRenderable;
