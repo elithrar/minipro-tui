@@ -1,4 +1,4 @@
-import { parseColor } from "@opentui/core";
+import { parseColor, StyledText, TextAttributes } from "@opentui/core";
 
 import { theme, tint } from "../components/ui/theme";
 import { cobaltDeep } from "../themes/cobalt-deep";
@@ -7,7 +7,7 @@ theme.register("cobalt-deep", cobaltDeep);
 theme.setActive("cobalt-deep");
 theme.setMode("dark");
 theme.override({
-  borders: { style: "rounded" },
+  borders: { style: "single" },
   density: { paddingX: 1, comfortablePaddingX: 2 },
 });
 
@@ -34,4 +34,20 @@ export const tuiTheme = {
   disconnected: tint(colors.background, colors.destructive, 0.12),
 } as const;
 
-export const chromeForeground = parseColor(tuiTheme.text);
+export type KeyHint = { key: string; label: string };
+
+export function formatKeyHints(hints: KeyHint[]): StyledText {
+  const chunks: StyledText["chunks"] = [];
+  hints.forEach((hint, index) => {
+    if (index > 0) chunks.push({ __isChunk: true, text: "  " });
+    chunks.push({
+      __isChunk: true,
+      text: ` ${hint.key} `,
+      fg: parseColor(tuiTheme.primary),
+      bg: parseColor(tuiTheme.element),
+      attributes: TextAttributes.BOLD,
+    });
+    chunks.push({ __isChunk: true, text: ` ${hint.label}`, fg: parseColor(tuiTheme.muted) });
+  });
+  return new StyledText(chunks);
+}

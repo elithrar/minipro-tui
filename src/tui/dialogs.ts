@@ -2,13 +2,10 @@ import {
   BoxRenderable,
   CliRenderEvents,
   InputRenderableEvents,
-  parseColor,
   RenderableEvents,
   ScrollBoxRenderable,
   SelectRenderable,
   SelectRenderableEvents,
-  StyledText,
-  TextAttributes,
   TextRenderable,
   type ColorInput,
   type CliRenderer,
@@ -20,6 +17,8 @@ import type { ButtonRenderable } from "@tuiparts/core/button";
 import { createButton } from "../components/ui/button";
 import { createDialog, type DialogRecipe } from "../components/ui/dialog";
 import { createInput } from "../components/ui/input";
+import { createSwitch } from "../components/ui/switch";
+import { formatKeyHints, type KeyHint } from "./theme";
 
 export type DialogTheme = {
   primary: ColorInput;
@@ -40,11 +39,18 @@ export type DialogControllerOptions = {
 };
 
 type ConfirmChoice = "cancel" | "confirm";
-type Shortcut = { key: string; label: string };
 type ModalFrame = {
   dialog: DialogRecipe;
   modal: DialogRecipe["popup"];
   onDismiss?: () => void;
+};
+
+export type SwitchDialogOption = {
+  checked: boolean;
+  description: string;
+  label: string;
+  onCheckedChange: (checked: boolean) => void;
+  tone?: "default" | "danger";
 };
 
 export class DialogController {
@@ -306,6 +312,99 @@ export class DialogController {
     });
   }
 
+  async switches(title: string, options: SwitchDialogOption[]): Promise<void> {
+    const renderer = this.options.getRenderer();
+    this.options.onOpen();
+    const viewportHeight = clamp(options.length, 4, Math.max(4, maxModalHeight(renderer) - 9));
+    const modalHeight = viewportHeight + 9;
+    const frame = this.modalBox(renderer, title, modalHeight);
+    const modal = frame.modal;
+    modal.add(new TextRenderable(renderer, {
+      content: "SPACE / ENTER TO TOGGLE  ·  DANGEROUS OVERRIDES TURN RED",
+      width: "100%",
+      height: 1,
+      fg: this.options.theme.muted,
+      bg: this.options.theme.panel,
+      marginBottom: 1,
+    }));
+
+    const scroll = new ScrollBoxRenderable(renderer, {
+      id: `switch-scroll-${this.nextModalId}`,
+      width: "100%",
+      height: viewportHeight,
+      scrollY: true,
+      rootOptions: { backgroundColor: this.options.theme.panel },
+      viewportOptions: { backgroundColor: this.options.theme.panel },
+      contentOptions: { backgroundColor: this.options.theme.panel },
+    });
+    scroll.focusable = false;
+    const controls = new BoxRenderable(renderer, {
+      width: "100%",
+      height: options.length,
+      flexDirection: "column",
+      backgroundColor: this.options.theme.panel,
+    });
+    const help = new TextRenderable(renderer, {
+      content: options[0]?.description ?? "",
+      width: "100%",
+      height: 2,
+      fg: this.options.theme.muted,
+      bg: this.options.theme.panel,
+      marginTop: 1,
+      wrapMode: "word",
+    });
+    let focusedIndex = 0;
+    const switches = options.map((option, index) => {
+      const control = createSwitch(renderer, {
+        defaultChecked: option.checked,
+        label: option.label,
+        onCheckedChange: option.onCheckedChange,
+        symbols: "ascii",
+        tone: option.tone,
+      });
+      control.width = "100%";
+      control.height = 1;
+      control.on(RenderableEvents.FOCUSED, () => {
+        focusedIndex = index;
+        help.content = option.description;
+        scroll.scrollTo(Math.max(0, index - 1));
+        renderer.root.requestRender();
+      });
+      controls.add(control);
+      return control;
+    });
+    scroll.add(controls);
+    modal.add(scroll);
+    modal.add(help);
+    modal.add(this.shortcutBar(renderer, [
+      { key: "Tab", label: "next control" },
+      { key: "Esc", label: "close" },
+    ]));
+    const unmount = this.mountModal(renderer, frame, modalHeight, (height) => {
+      scroll.height = Math.max(1, height - 9);
+      // ScrollBox clamps against its previous viewport until resize layout commits.
+      renderer.once(CliRenderEvents.FRAME, () => {
+        if (scroll.isDestroyed) return;
+        scroll.scrollTo(Math.max(0, focusedIndex - 1));
+        renderer.root.requestRender();
+      });
+    });
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        unmount();
+        this.closeModal(renderer, frame);
+        this.options.onClose();
+        resolve();
+      };
+      frame.onDismiss = done;
+      switches[0]?.focus();
+    });
+  }
+
   private modalBox(renderer: CliRenderer, title: string, height: number): ModalFrame {
     const modalHeight = clamp(height, 7, maxModalHeight(renderer));
     const width = modalWidth(renderer);
@@ -322,7 +421,7 @@ export class DialogController {
         height: modalHeight,
         borderColor: this.options.theme.borderActive,
         focusedBorderColor: this.options.theme.primary,
-        title: ` ${title} `,
+        title: ` ${title.toUpperCase()} `,
         titleColor: this.options.theme.primary,
         titleAlignment: "left",
         backgroundColor: this.options.theme.panel,
@@ -374,8 +473,8 @@ export class DialogController {
     const button = createButton(renderer, { label, intent });
     button.width = width;
     button.height = 3;
-    button.border = true;
-    button.borderStyle = "rounded";
+    button.border = intent === "neutral";
+    button.borderStyle = "single";
     button.borderColor = this.options.theme.borderActive;
     button.alignItems = "center";
     button.justifyContent = "center";
@@ -383,13 +482,12 @@ export class DialogController {
   }
 
   private setButtonState(button: ButtonRenderable, active: boolean): void {
-    button.borderStyle = active ? "heavy" : "rounded";
     button.borderColor = active ? this.options.theme.primary : this.options.theme.borderActive;
   }
 
-  private shortcutBar(renderer: CliRenderer, shortcuts: Shortcut[], marginTop = 0): TextRenderable {
+  private shortcutBar(renderer: CliRenderer, shortcuts: KeyHint[], marginTop = 0): TextRenderable {
     return new TextRenderable(renderer, {
-      content: formatShortcuts(shortcuts, this.options.theme),
+      content: formatKeyHints(shortcuts),
       width: "100%",
       height: 1,
       bg: this.options.theme.panel,
@@ -438,22 +536,6 @@ function modalInnerWidth(renderer: CliRenderer): number {
 
 function modalWidth(renderer: CliRenderer): number {
   return Math.max(1, Math.min(72, renderer.width - 2));
-}
-
-function formatShortcuts(shortcuts: Shortcut[], theme: DialogTheme): StyledText {
-  const chunks: StyledText["chunks"] = [];
-  shortcuts.forEach((shortcut, index) => {
-    if (index > 0) chunks.push({ __isChunk: true, text: "  " });
-    chunks.push({
-      __isChunk: true,
-      text: ` ${shortcut.key} `,
-      fg: parseColor(theme.primary),
-      bg: parseColor(theme.element),
-      attributes: TextAttributes.BOLD,
-    });
-    chunks.push({ __isChunk: true, text: ` ${shortcut.label}`, fg: parseColor(theme.muted) });
-  });
-  return new StyledText(chunks);
 }
 
 function estimateWrappedRows(content: string, width: number): number {

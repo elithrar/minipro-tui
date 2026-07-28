@@ -39,6 +39,9 @@ const COMMAND_LOG_BG = tuiTheme.elementFocused;
 const COMMAND_LOG_FG = parseColor(tuiTheme.primary);
 const DANGEROUS_OFF_BG = parseColor(tuiTheme.destructive);
 const DANGEROUS_OFF_FG = parseColor(tuiTheme.destructiveText);
+const STATUS_LABEL_FG = parseColor(tuiTheme.muted);
+const STAGE_ON_FG = parseColor(tuiTheme.success);
+const STAGE_OFF_FG = parseColor(tuiTheme.muted);
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
@@ -47,11 +50,10 @@ export function formatStatusLine(input: {
   selectedFile?: FileEntry;
   job: JobState;
 }): string {
-  const programmer = input.programmerStatus.connected ? (input.programmerStatus.model ?? "connected") : "disconnected";
   const file = input.selectedFile ? truncateMiddle(input.selectedFile.name, 30) : "no file";
   const chip = input.selectedChip ? truncateMiddle(input.selectedChip, 24) : "no chip";
   const job = input.job.kind === "running" ? input.job.step : input.job.kind;
-  return ` USB ${programmer} | ${input.database.toUpperCase()} catalog | ${chip} | ${file} | ${job}`;
+  return ` ${chip}  //  ${file}  //  ${job.toUpperCase()}`;
 }
 
 export function formatGuidanceLine(input: GuidanceInput): string {
@@ -209,12 +211,14 @@ function formatStatusRowChunks(row: StatusRow, width: number | undefined, newlin
   const available = width === undefined ? Number.MAX_SAFE_INTEGER : Math.max(0, width - prefix.length);
   const value = truncateEnd(row.value, available);
   const suffix = newline ? "\n" : "";
-  const chunks: StyledText["chunks"] = [{ __isChunk: true, text: prefix }];
+  const chunks: StyledText["chunks"] = [{ __isChunk: true, text: prefix, fg: STATUS_LABEL_FG }];
 
   if (row.stage === "on") {
-    chunks.push({ __isChunk: true, text: value, attributes: TextAttributes.BOLD });
+    chunks.push({ __isChunk: true, text: value, fg: STAGE_ON_FG, attributes: TextAttributes.BOLD });
   } else if (row.stage === "danger-off") {
     chunks.push({ __isChunk: true, text: value, fg: DANGEROUS_OFF_FG, bg: DANGEROUS_OFF_BG, attributes: TextAttributes.BOLD });
+  } else if (row.stage === "off") {
+    chunks.push({ __isChunk: true, text: value, fg: STAGE_OFF_FG });
   } else {
     chunks.push({ __isChunk: true, text: value });
   }
@@ -226,7 +230,7 @@ function formatStatusRowChunks(row: StatusRow, width: number | undefined, newlin
 type StatusRow = {
   label: string;
   value: string;
-  stage?: "on" | "danger-off";
+  stage?: "on" | "off" | "danger-off";
 };
 
 function statusRows(input: StatusSummaryInput): StatusRow[] {
@@ -247,11 +251,11 @@ function statusRows(input: StatusSummaryInput): StatusRow[] {
 }
 
 function stageRow(label: string, enabled: boolean, dangerousWhenOff: boolean): StatusRow {
-  return { label, value: stageState(enabled), stage: enabled ? "on" : dangerousWhenOff ? "danger-off" : undefined };
+  return { label, value: stageState(enabled), stage: enabled ? "on" : dangerousWhenOff ? "danger-off" : "off" };
 }
 
 function stageState(enabled: boolean): string {
-  return enabled ? "ON" : "OFF";
+  return enabled ? "● ON" : "○ OFF";
 }
 
 function formatChipStatus(input: StatusSummaryInput): string {

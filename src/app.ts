@@ -7,7 +7,6 @@ import {
   createCliRenderer,
   InputRenderable,
   InputRenderableEvents,
-  type ColorInput,
   RenderableEvents,
   ScrollBoxRenderable,
   SelectRenderable,
@@ -33,7 +32,7 @@ import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings } from "./safety/opti
 import { loadState, saveState, type PersistedState } from "./state";
 import { DialogController } from "./tui/dialogs";
 import { formatChipInfo, formatChipLabel, formatFileTreeOption, formatGuidanceLine, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
-import { chromeForeground, tuiTheme } from "./tui/theme";
+import { formatKeyHints, type KeyHint, tuiTheme } from "./tui/theme";
 
 const PRIMARY = tuiTheme.primary;
 const BG = tuiTheme.background;
@@ -45,15 +44,13 @@ const BORDER_ACTIVE = tuiTheme.borderActive;
 const TEXT = tuiTheme.text;
 const SELECTED_TEXT = tuiTheme.selectedText;
 const MUTED = tuiTheme.muted;
-const CONNECTED = tuiTheme.connected;
-const DISCONNECTED = tuiTheme.disconnected;
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
 const RECENT_LIMIT = 8;
 const LOG_LINE_LIMIT = 2000;
 const COMPACT_WIDTH = 90;
-const COMPACT_HEIGHT = 22;
+const COMPACT_HEIGHT = 28;
 
 type CompactPanel = "files" | "chips" | "status" | "log";
 type Notice = { tone: "info" | "error"; message: string };
@@ -73,11 +70,21 @@ type Components = {
   compactTabs: TabSelectRenderable;
   compactContent: BoxRenderable;
   statusBarBox: BoxRenderable;
+  brandBadge: BoxRenderable;
+  compactBrandBadge: BoxRenderable;
+  buildLabel: TextRenderable;
   statusChrome: TextRenderable;
+  guidanceChrome: TextRenderable;
+  connectedBadge: BoxRenderable;
+  disconnectedBadge: BoxRenderable;
+  t48Badge: BoxRenderable;
+  t56Badge: BoxRenderable;
   filesPanel: BoxRenderable;
+  fileSearchBox: BoxRenderable;
   fileQuery: InputRenderable;
   files: SelectRenderable;
   chipPanel: BoxRenderable;
+  chipSearchBox: BoxRenderable;
   chipQuery: InputRenderable;
   chips: SelectRenderable;
   statusPanel: BoxRenderable;
@@ -86,6 +93,7 @@ type Components = {
   log: ScrollBoxRenderable;
   logText: TextRenderable;
   footerBox: BoxRenderable;
+  footerText: TextRenderable;
 };
 
 export class MiniproTuiApp {
@@ -121,7 +129,6 @@ export class MiniproTuiApp {
   private chipOptionsKey = "";
   private statusLine = "";
   private guidanceLine = "";
-  private footerLine = "";
   private notice: Notice | undefined;
   private chipSearch: ChipSearchState | undefined;
   private activeAbortController: AbortController | undefined;
@@ -197,36 +204,97 @@ export class MiniproTuiApp {
     const statusBarBox = new BoxRenderable(renderer, {
       id: "status-bar-box",
       width: "100%",
-      height: 2,
+      height: 4,
+      flexDirection: "column",
+      backgroundColor: PANEL,
+      border: ["bottom"],
+      borderStyle: "single",
+      borderColor: BORDER,
+    });
+    const metaRow = new BoxRenderable(renderer, {
+      width: "100%",
+      height: 1,
       flexDirection: "row",
-      backgroundColor: BG,
+      backgroundColor: PANEL,
+      paddingLeft: 1,
+      paddingRight: 1,
     });
     const brandBadge = createBadge(renderer, {
       id: "brand-badge",
-      label: "MINIPRO",
-      intent: "warning",
-      width: 11,
-      height: 2,
+      label: "MINIPRO // EEPROM WORKBENCH",
+      intent: "neutral",
+      height: 1,
       alignItems: "center",
       justifyContent: "center",
+      backgroundColor: PANEL,
     });
+    const compactBrandBadge = createBadge(renderer, {
+      label: "MINIPRO",
+      intent: "neutral",
+      height: 1,
+      backgroundColor: PANEL,
+      visible: false,
+    });
+    const buildLabel = new TextRenderable(renderer, {
+      content: "DIRECT USB  //  SAFE WRITE FLOW",
+      width: 31,
+      height: 1,
+      fg: MUTED,
+      bg: PANEL,
+    });
+    metaRow.add(brandBadge);
+    metaRow.add(compactBrandBadge);
+    metaRow.add(new BoxRenderable(renderer, { flexGrow: 1, height: 1, backgroundColor: PANEL }));
+    metaRow.add(buildLabel);
+
+    const contextRow = new BoxRenderable(renderer, {
+      width: "100%",
+      height: 1,
+      flexDirection: "row",
+      backgroundColor: PANEL,
+      paddingLeft: 1,
+      paddingRight: 1,
+      columnGap: 1,
+    });
+    const connectedBadge = createBadge(renderer, { label: "USB ONLINE", intent: "success", height: 1 });
+    const disconnectedBadge = createBadge(renderer, { label: "USB OFFLINE", intent: "danger", height: 1 });
+    const t48Badge = createBadge(renderer, { label: "T48 CATALOG", intent: "warning", height: 1 });
+    const t56Badge = createBadge(renderer, { label: "T56 CATALOG", intent: "warning", height: 1 });
     const statusChrome = new TextRenderable(renderer, {
       id: "status-chrome",
       flexGrow: 1,
-      height: 2,
+      height: 1,
       fg: TEXT,
-      bg: DISCONNECTED,
+      bg: PANEL,
       wrapMode: "none",
     });
-    statusBarBox.add(brandBadge);
-    statusBarBox.add(statusChrome);
+    contextRow.add(connectedBadge);
+    contextRow.add(disconnectedBadge);
+    contextRow.add(t48Badge);
+    contextRow.add(t56Badge);
+    contextRow.add(statusChrome);
+    const guidanceChrome = new TextRenderable(renderer, {
+      id: "guidance-chrome",
+      width: "100%",
+      height: 1,
+      fg: MUTED,
+      bg: PANEL,
+      wrapMode: "none",
+      paddingLeft: 1,
+      paddingRight: 1,
+    });
+    statusBarBox.add(metaRow);
+    statusBarBox.add(contextRow);
+    statusBarBox.add(guidanceChrome);
 
     const main = new BoxRenderable(renderer, {
       id: "main",
       flexGrow: 1,
       width: "100%",
       flexDirection: "column",
-      padding: 1,
+      paddingTop: 1,
+      paddingLeft: 1,
+      paddingRight: 1,
       backgroundColor: BG,
       onMouseDown: (event) => this.handleWorkbenchPointerDown(event.x, event.y),
     });
@@ -237,13 +305,13 @@ export class MiniproTuiApp {
       height: 1,
       tabWidth: 10,
       options: [
-        { name: "Files", description: "Browse images", value: "files" },
-        { name: "Chips", description: "Search devices", value: "chips" },
-        { name: "Status", description: "Review safety", value: "status" },
-        { name: "Log", description: "Command output", value: "log" },
+        { name: "Image", description: "Browse images", value: "files" },
+        { name: "Device", description: "Search devices", value: "chips" },
+        { name: "Safety", description: "Review safety", value: "status" },
+        { name: "Trace", description: "Command output", value: "log" },
       ],
       showDescription: false,
-      showUnderline: true,
+      showUnderline: false,
       wrapSelection: true,
       backgroundColor: BG,
       focusedBackgroundColor: BG,
@@ -260,18 +328,19 @@ export class MiniproTuiApp {
     });
 
     const topRow = new BoxRenderable(renderer, { id: "top-row", height: 15, width: "100%", flexDirection: "row", marginBottom: 1 });
-    const filesPanel = panel(renderer, "files-panel", "Files");
+    const filesPanel = panel(renderer, "files-panel", "01 IMAGE // .");
+    filesPanel.flexGrow = 1.2;
     filesPanel.marginRight = 1;
+    const fileSearchBox = searchBox(renderer, "file-search-box");
     const fileQuery = createInput(renderer, {
       id: "file-query",
       value: "",
       placeholder: "Find files or folders",
       width: "100%",
-      backgroundColor: PANEL,
-      focusedBackgroundColor: ELEMENT_FOCUSED,
+      backgroundColor: "transparent",
+      focusedBackgroundColor: "transparent",
       textColor: TEXT,
       cursorColor: PRIMARY,
-      marginBottom: 1,
     });
     fileQuery.onKeyDown = (key) => {
       if (isEscapeKey(key)) {
@@ -280,21 +349,23 @@ export class MiniproTuiApp {
       }
     };
     const files = new SelectRenderable(renderer, selectOptions("files", "100%"));
-    filesPanel.add(fileQuery);
+    fileSearchBox.add(fileQuery);
+    filesPanel.add(fileSearchBox);
     filesPanel.add(files);
 
-    const chipPanel = panel(renderer, "chip-panel", "Chip Search");
+    const chipPanel = panel(renderer, "chip-panel", "02 DEVICE CATALOG");
+    chipPanel.flexGrow = 0.9;
     chipPanel.marginRight = 1;
+    const chipSearchBox = searchBox(renderer, "chip-search-box");
     const chipQuery = createInput(renderer, {
       id: "chip-query",
       value: DEFAULT_CHIP_QUERY,
       placeholder: "AT28C64B",
       width: "100%",
-      backgroundColor: PANEL,
-      focusedBackgroundColor: ELEMENT_FOCUSED,
+      backgroundColor: "transparent",
+      focusedBackgroundColor: "transparent",
       textColor: TEXT,
       cursorColor: PRIMARY,
-      marginBottom: 1,
     });
     chipQuery.onKeyDown = (key) => {
       if (isEscapeKey(key)) {
@@ -307,10 +378,12 @@ export class MiniproTuiApp {
       showDescription: false,
       itemSpacing: 0,
     });
-    chipPanel.add(chipQuery);
+    chipSearchBox.add(chipQuery);
+    chipPanel.add(chipSearchBox);
     chipPanel.add(chips);
 
-    const statusPanel = panel(renderer, "status-panel", "Status");
+    const statusPanel = panel(renderer, "status-panel", "03 WRITE RECEIPT");
+    statusPanel.flexGrow = 1.1;
     statusPanel.width = "100%";
     const statusSummary = new TextRenderable(renderer, {
       id: "status-summary",
@@ -323,7 +396,7 @@ export class MiniproTuiApp {
     });
     statusPanel.add(statusSummary);
 
-    const logPanel = panel(renderer, "log-panel", "Actions / Log");
+    const logPanel = panel(renderer, "log-panel", "04 OPERATION TRACE");
     logPanel.flexGrow = 1;
     logPanel.width = "100%";
     const log = new ScrollBoxRenderable(renderer, {
@@ -340,7 +413,25 @@ export class MiniproTuiApp {
     log.add(logText);
     logPanel.add(log);
 
-    const footerBox = lineBox(renderer, "footer", BG, () => this.footerLine);
+    const footerBox = new BoxRenderable(renderer, {
+      id: "footer",
+      width: "100%",
+      height: 2,
+      border: ["top"],
+      borderStyle: "single",
+      borderColor: BORDER,
+      backgroundColor: BG,
+      paddingLeft: 1,
+      paddingRight: 1,
+      alignItems: "center",
+    });
+    const footerText = new TextRenderable(renderer, {
+      id: "footer-text",
+      width: "100%",
+      height: 1,
+      bg: BG,
+    });
+    footerBox.add(footerText);
 
     topRow.add(filesPanel);
     topRow.add(chipPanel);
@@ -353,7 +444,13 @@ export class MiniproTuiApp {
     renderer.root.add(root);
     files.focus();
 
-    return { main, topRow, compactTabs, compactContent, statusBarBox, statusChrome, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, logText, footerBox };
+    return {
+      main, topRow, compactTabs, compactContent, statusBarBox, brandBadge, compactBrandBadge, buildLabel, statusChrome, guidanceChrome,
+      connectedBadge, disconnectedBadge, t48Badge, t56Badge,
+      filesPanel, fileSearchBox, fileQuery, files,
+      chipPanel, chipSearchBox, chipQuery, chips,
+      statusPanel, statusSummary, logPanel, log, logText, footerBox, footerText,
+    };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -921,49 +1018,72 @@ export class MiniproTuiApp {
   }
 
   private async advancedModal(): Promise<void> {
-    const choice = await this.dialogs.select("Advanced Controls", [
-      { name: `Show all files: ${this.showAllFiles ? "on" : "off"}`, description: "Toggle current-folder file filter", value: "all" },
-      { name: `Pre-write backup: ${this.advanced.backupBeforeWrite ? "on" : "off"}`, description: "Read the current chip to a chosen file before erase", value: "backup" },
-      { name: `Disable write protection: ${this.advanced.unprotectBefore ? "on" : "off"}`, description: "Dangerous: disable protection before programming", value: "u" },
-      { name: `Allow size mismatch: ${this.advanced.allowSizeMismatch ? "on" : "off"}`, description: "Dangerous: permits file/chip size mismatch", value: "s" },
-      { name: `Disable readback compare: ${this.advanced.disableReadbackCompare ? "on" : "off"}`, description: "Dangerous: skips post-write byte compare", value: "r" },
-      { name: `Skip explicit erase: ${this.advanced.skipErase ? "on" : "off"}`, description: "Only proceeds if the chip already passes blank check", value: "e" },
-      { name: `Skip verify: ${this.advanced.skipVerify ? "on" : "off"}`, description: "Dangerous: skips verify", value: "v" },
-      { name: `Ignore ID mismatch: ${this.advanced.ignoreIdMismatch ? "on" : "off"}`, description: "Dangerous: bypasses ID mismatch", value: "y" },
-      { name: `Skip ID read: ${this.advanced.skipIdRead ? "on" : "off"}`, description: "Dangerous for read mode", value: "x" },
+    const previous = JSON.stringify({ showAllFiles: this.showAllFiles, advanced: this.advanced });
+    const previousShowAllFiles = this.showAllFiles;
+    await this.dialogs.switches("Advanced Controls", [
+      {
+        label: "SHOW ALL FILE TYPES",
+        description: "Include files outside the supported programming-image extensions.",
+        checked: this.showAllFiles,
+        onCheckedChange: (checked) => { this.showAllFiles = checked; },
+      },
+      {
+        label: "PRE-WRITE BACKUP",
+        description: "Read the current chip to a new file before erase begins.",
+        checked: Boolean(this.advanced.backupBeforeWrite),
+        onCheckedChange: (checked) => { this.advanced.backupBeforeWrite = checked; },
+      },
+      {
+        label: "DISABLE WRITE PROTECTION",
+        description: "Dangerous: disable supported software protection before programming.",
+        checked: Boolean(this.advanced.unprotectBefore),
+        onCheckedChange: (checked) => { this.advanced.unprotectBefore = checked; },
+        tone: "danger",
+      },
+      {
+        label: "ALLOW SIZE MISMATCH",
+        description: "Dangerous: permit image and chip capacity to differ.",
+        checked: Boolean(this.advanced.allowSizeMismatch),
+        onCheckedChange: (checked) => { this.advanced.allowSizeMismatch = checked; },
+        tone: "danger",
+      },
+      {
+        label: "DISABLE READBACK COMPARE",
+        description: "Dangerous: skip the independent post-write byte comparison.",
+        checked: Boolean(this.advanced.disableReadbackCompare),
+        onCheckedChange: (checked) => { this.advanced.disableReadbackCompare = checked; },
+        tone: "danger",
+      },
+      {
+        label: "SKIP EXPLICIT ERASE",
+        description: "Proceed only if the chip already passes the mandatory blank check.",
+        checked: Boolean(this.advanced.skipErase),
+        onCheckedChange: (checked) => { this.advanced.skipErase = checked; },
+      },
+      {
+        label: "SKIP VERIFY",
+        description: "Dangerous: skip the programmer's post-write verification pass.",
+        checked: Boolean(this.advanced.skipVerify),
+        onCheckedChange: (checked) => { this.advanced.skipVerify = checked; },
+        tone: "danger",
+      },
+      {
+        label: "IGNORE ID MISMATCH",
+        description: "Dangerous: continue when the detected chip ID does not match.",
+        checked: Boolean(this.advanced.ignoreIdMismatch),
+        onCheckedChange: (checked) => { this.advanced.ignoreIdMismatch = checked; },
+        tone: "danger",
+      },
+      {
+        label: "SKIP ID READ",
+        description: "Dangerous for reads: do not identify the chip before accessing it.",
+        checked: Boolean(this.advanced.skipIdRead),
+        onCheckedChange: (checked) => { this.advanced.skipIdRead = checked; },
+        tone: "danger",
+      },
     ]);
-    switch (choice?.value) {
-      case "all":
-        this.showAllFiles = !this.showAllFiles;
-        this.queueStateSave();
-        await this.refresh();
-        return;
-      case "s":
-        this.advanced.allowSizeMismatch = !this.advanced.allowSizeMismatch;
-        break;
-      case "backup":
-        this.advanced.backupBeforeWrite = !this.advanced.backupBeforeWrite;
-        break;
-      case "u":
-        this.advanced.unprotectBefore = !this.advanced.unprotectBefore;
-        break;
-      case "r":
-        this.advanced.disableReadbackCompare = !this.advanced.disableReadbackCompare;
-        break;
-      case "e":
-        this.advanced.skipErase = !this.advanced.skipErase;
-        break;
-      case "v":
-        this.advanced.skipVerify = !this.advanced.skipVerify;
-        break;
-      case "y":
-        this.advanced.ignoreIdMismatch = !this.advanced.ignoreIdMismatch;
-        break;
-      case "x":
-        this.advanced.skipIdRead = !this.advanced.skipIdRead;
-        break;
-    }
-    if (choice) {
+    if (previousShowAllFiles !== this.showAllFiles) await this.refreshFiles();
+    if (previous !== JSON.stringify({ showAllFiles: this.showAllFiles, advanced: this.advanced })) {
       this.appendLog(`Advanced options: ${JSON.stringify(this.advanced)}`);
       this.queueStateSave();
     }
@@ -1057,6 +1177,9 @@ export class MiniproTuiApp {
       components.main.remove(components.logPanel);
       components.main.insertBefore(components.compactTabs, components.footerBox);
       components.main.insertBefore(components.compactContent, components.footerBox);
+      components.brandBadge.visible = false;
+      components.compactBrandBadge.visible = true;
+      components.buildLabel.visible = false;
       this.compactMode = true;
       this.setCompactPanel(this.compactPanel);
     } else {
@@ -1067,10 +1190,12 @@ export class MiniproTuiApp {
       for (const panel of [components.filesPanel, components.chipPanel, components.statusPanel]) {
         panel.parent?.remove(panel);
         panel.width = "auto";
-        panel.flexGrow = 1;
         panel.flexBasis = 0;
         panel.marginBottom = 0;
       }
+      components.filesPanel.flexGrow = 1.2;
+      components.chipPanel.flexGrow = 0.9;
+      components.statusPanel.flexGrow = 1.1;
       components.filesPanel.marginRight = 1;
       components.chipPanel.marginRight = 1;
       components.statusPanel.marginRight = 0;
@@ -1079,6 +1204,9 @@ export class MiniproTuiApp {
       components.topRow.add(components.statusPanel);
       components.main.insertBefore(components.topRow, components.footerBox);
       components.main.insertBefore(components.logPanel, components.footerBox);
+      components.brandBadge.visible = true;
+      components.compactBrandBadge.visible = false;
+      components.buildLabel.visible = true;
       this.compactMode = false;
       if (components.compactTabs.focused) {
         const target = this.compactPanel === "chips" ? components.chipQuery : this.compactPanel === "log" ? components.log : components.fileQuery;
@@ -1218,7 +1346,7 @@ export class MiniproTuiApp {
       selectedChip: this.selectedChip,
       selectedFile: this.selectedFile,
       job: this.job,
-    })} | Focus ${focus}`;
+    })}  //  FOCUS ${focus.toUpperCase()}`;
     const filteredFileEntries = filterFileTreeEntries(this.fileTreeEntries, this.fileQuery, this.fileDirectory);
     const visibleFileEntries = this.fileQuery.trim() ? filteredFileEntries : orderFileTreeEntries(filteredFileEntries, this.recentFilePaths, this.recentDirectories);
     const fileOptions = visibleFileEntries.length > 0
@@ -1262,9 +1390,23 @@ export class MiniproTuiApp {
       notice: this.notice,
       chipSearch: this.chipSearch,
     });
-    this.components.statusChrome.bg = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
-    this.components.statusChrome.content = `${this.statusLine}\n${this.guidanceLine}`;
-    this.footerLine = footerText(focus, this.compactMode, this.activeCommandCancellable);
+    this.components.connectedBadge.visible = this.programmerStatus.connected;
+    this.components.disconnectedBadge.visible = !this.programmerStatus.connected;
+    this.components.t48Badge.visible = !this.compactMode && this.database === "t48";
+    this.components.t56Badge.visible = !this.compactMode && this.database === "t56";
+    const jobLabel = this.job.kind === "running" ? this.job.step : this.job.kind;
+    this.components.statusChrome.content = this.compactMode
+      ? ` ${jobLabel.toUpperCase()}  //  ${focus.toUpperCase()}`
+      : this.statusLine;
+    this.components.guidanceChrome.content = this.guidanceLine;
+    this.components.guidanceChrome.fg = this.notice?.tone === "error" || this.job.kind === "failed"
+      ? tuiTheme.destructive
+      : this.job.kind === "done"
+        ? tuiTheme.success
+        : this.job.kind === "running"
+          ? tuiTheme.warning
+          : MUTED;
+    this.components.footerText.content = formatKeyHints(footerHints(focus, this.compactMode, this.activeCommandCancellable));
     this.renderer?.root.requestRender();
   }
 
@@ -1298,18 +1440,20 @@ export class MiniproTuiApp {
     const components = this.requireComponents();
     setPanelFocus(
       components.filesPanel,
-      `Files ${formatDirectoryLabel(this.fileDirectory)}`,
+      `01 IMAGE // ${formatDirectoryLabel(this.fileDirectory).toUpperCase()}`,
       focus === "File Search" || focus === "Files",
       focus === "File Search" ? " [Enter/Esc] results " : undefined,
     );
     setPanelFocus(
       components.chipPanel,
-      "Chip Search",
+      "02 DEVICE CATALOG",
       focus === "Chip Search" || focus === "Chip Results",
       focus === "Chip Search" ? " [Enter] search  [Esc] results " : undefined,
     );
-    setPanelFocus(components.statusPanel, "Status", false);
-    setPanelFocus(components.logPanel, "Actions / Log", focus === "Log");
+    setPanelFocus(components.statusPanel, "03 WRITE RECEIPT", false);
+    setPanelFocus(components.logPanel, "04 OPERATION TRACE", focus === "Log");
+    components.fileSearchBox.borderColor = focus === "File Search" ? PRIMARY : BORDER;
+    components.chipSearchBox.borderColor = focus === "Chip Search" ? PRIMARY : BORDER;
   }
 
   private restoreState(state: PersistedState): void {
@@ -1388,29 +1532,33 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
   return new BoxRenderable(renderer, {
     id,
     title: ` ${title} `,
-    titleColor: PRIMARY,
+    titleColor: MUTED,
     border: true,
-    borderStyle: "rounded",
+    borderStyle: "single",
     borderColor: BORDER,
     focusedBorderColor: PRIMARY,
     backgroundColor: PANEL,
-    padding: 1,
+    paddingTop: 1,
+    paddingLeft: 1,
+    paddingRight: 1,
     flexGrow: 1,
     flexBasis: 0,
     flexDirection: "column",
   });
 }
 
-function lineBox(renderer: CliRenderer, id: string, backgroundColor: ColorInput, getText: () => string, height = 1): BoxRenderable {
+function searchBox(renderer: CliRenderer, id: string): BoxRenderable {
   return new BoxRenderable(renderer, {
     id,
-    height,
+    height: 3,
     width: "100%",
-    backgroundColor,
-    padding: 0,
-    renderAfter: function (buffer) {
-      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY + this.height - 1, chromeForeground);
-    },
+    backgroundColor: PANEL,
+    border: true,
+    borderStyle: "single",
+    borderColor: BORDER,
+    paddingLeft: 1,
+    paddingRight: 1,
+    marginBottom: 1,
   });
 }
 
@@ -1434,28 +1582,28 @@ function selectOptions(id: string, height: number | `${number}%`): ConstructorPa
   };
 }
 
-function footerText(focus: string, compact: boolean, cancellable: boolean): string {
-  if (cancellable) return "[Esc] cancel current step  [?] help";
-  const focusHint = compact ? "" : "  [Tab/Shift+Tab] focus";
+function footerHints(focus: string, compact: boolean, cancellable: boolean): KeyHint[] {
+  if (cancellable) return [{ key: "Esc", label: "cancel current step" }, { key: "?", label: "help" }];
+  const focusHint: KeyHint[] = compact ? [] : [{ key: "Tab", label: "move focus" }];
   switch (focus) {
     case "File Search":
-      return `[Type] filter  [Enter/Esc] results${focusHint}  [/] chips  [?] help`;
+      return [{ key: "Type", label: "filter" }, { key: "Enter/Esc", label: "results" }, ...focusHint, { key: "/", label: "device" }, { key: "?", label: "help" }];
     case "Files":
       return compact
-        ? "[↑/↓] move  [Enter] open  [Bksp] up  [F] filter  [/] chips  [?] help"
-        : "[↑/↓] browse  [Enter] open  [Backspace] up  [F] filter  [/] chips  [W] write  [?] help";
+        ? [{ key: "Up/Down", label: "move" }, { key: "Enter", label: "open" }, { key: "Bksp", label: "up" }, { key: "F", label: "filter" }, { key: "/", label: "device" }]
+        : [{ key: "Up/Down", label: "browse" }, { key: "Enter", label: "open" }, { key: "Bksp", label: "up" }, { key: "F", label: "filter" }, { key: "/", label: "device" }, { key: "W", label: "write" }];
     case "Chip Search":
-      return `[Type] query  [Enter] search  [Esc] results${focusHint}  [F] files  [?] help`;
+      return [{ key: "Type", label: "query" }, { key: "Enter", label: "search" }, { key: "Esc", label: "results" }, ...focusHint, { key: "F", label: "image" }, { key: "?", label: "help" }];
     case "Chip Results":
       return compact
-        ? "[↑/↓] browse  [Enter] select  [/] search  [I] info  [?] help"
-        : "[↑/↓] browse  [Enter] select  [/] search  [I] info  [W] write  [?] help";
+        ? [{ key: "Up/Down", label: "browse" }, { key: "Enter", label: "select" }, { key: "/", label: "search" }, { key: "I", label: "info" }]
+        : [{ key: "Up/Down", label: "browse" }, { key: "Enter", label: "select" }, { key: "/", label: "search" }, { key: "I", label: "info" }, { key: "W", label: "write" }];
     case "Log":
-      return "[↑/↓] scroll  [Tab/Shift+Tab] focus  [?] help  [Q] quit";
+      return [{ key: "Up/Down", label: "scroll" }, { key: "Tab", label: "move focus" }, { key: "?", label: "help" }, { key: "Q", label: "quit" }];
     case "Sections":
-      return "[←/→] section  [Enter] open  [Tab/Shift+Tab] focus  [?] help";
+      return [{ key: "Left/Right", label: "section" }, { key: "Enter", label: "open" }, { key: "Tab", label: "move focus" }, { key: "?", label: "help" }];
     default:
-      return "[Tab/Shift+Tab] focus  [?] help  [Q] quit";
+      return [{ key: "Tab", label: "move focus" }, { key: "?", label: "help" }, { key: "Q", label: "quit" }];
   }
 }
 
@@ -1631,8 +1779,8 @@ function pointInRenderable(renderable: { screenX: number; screenY: number; width
 
 function setPanelFocus(panel: BoxRenderable, title: string, focused: boolean, shortcut?: string): void {
   panel.title = ` ${title} `;
-  panel.titleColor = focused ? TEXT : PRIMARY;
-  panel.borderStyle = focused ? "heavy" : "rounded";
+  panel.titleColor = focused ? PRIMARY : MUTED;
+  panel.borderStyle = "single";
   panel.borderColor = focused ? PRIMARY : BORDER;
   panel.bottomTitle = focused ? shortcut ?? panelShortcut(panel.id) : undefined;
   panel.bottomTitleAlignment = "right";

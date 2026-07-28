@@ -10,7 +10,7 @@ test("status line shows disconnected programmer state", () => {
       database: "t48",
       job: { kind: "idle" },
     }),
-  ).toContain("USB disconnected | T48 catalog |");
+  ).toContain("no chip  //  no file  //  IDLE");
 });
 
 test("status line stays compact", () => {
@@ -22,7 +22,7 @@ test("status line stays compact", () => {
     job: { kind: "idle" },
   });
 
-  expect(line).toContain("USB T48 | T48 catalog | AT28C64B | 911 chip 89 911 28pin 3.bin | idle");
+  expect(line).toContain("AT28C64B  //  911 chip 89 911 28pin 3.bin  //  IDLE");
   expect(line).not.toContain("8192 B");
   expect(line).not.toContain("a1b2c3d4");
 });
@@ -65,11 +65,11 @@ test("status summary shows matching chip and image as ready", () => {
   });
 
   expect(summary).toContain("Fit      OK 8.0 KiB");
-  expect(summary).toContain("Erase    ON");
-  expect(summary).toContain("Blank    ON");
-  expect(summary).toContain("Write    ON");
-  expect(summary).toContain("Verify   ON");
-  expect(summary).toContain("Compare  ON");
+  expect(summary).toContain("Erase    ● ON");
+  expect(summary).toContain("Blank    ● ON");
+  expect(summary).toContain("Write    ● ON");
+  expect(summary).toContain("Verify   ● ON");
+  expect(summary).toContain("Compare  ● ON");
   expect(summary).toContain("Chip     AT28C64B / 8.0 KiB / DIP28");
   expect(summary).toContain("Image    image.bin / 8.0 KiB / a1b2c3d4");
   expect(summary).not.toContain("Next");
@@ -89,8 +89,8 @@ test("status summary styles enabled and dangerous disabled stages", () => {
     showAllFiles: false,
   });
 
-  const onChunk = content.chunks.find((chunk) => chunk.text === "ON");
-  const offChunks = content.chunks.filter((chunk) => chunk.text === "OFF" && chunk.bg !== undefined);
+  const onChunk = content.chunks.find((chunk) => chunk.text === "● ON");
+  const offChunks = content.chunks.filter((chunk) => chunk.text === "○ OFF" && chunk.bg !== undefined);
   expect(onChunk?.attributes).toBe(TextAttributes.BOLD);
   expect(offChunks).toHaveLength(2);
   expect(offChunks.every((chunk) => chunk.attributes === TextAttributes.BOLD && chunk.bg !== undefined)).toBe(true);
@@ -146,7 +146,7 @@ test("status summary exposes dangerous overrides", () => {
   });
 
   expect(summary).toContain("Fit      OVERRIDE 4.0 KiB vs 8.0 KiB");
-  expect(summary).toContain("Compare  OFF");
+  expect(summary).toContain("Compare  ○ OFF");
   expect(summary).toContain("Safety   REVIEW 2 overrides");
 });
 
