@@ -16,6 +16,7 @@
   "type": "module",
   "dependencies": {
     "@opentui/core": "^0.4.3",
+    "@tuiparts/core": ">=0.0.1 <0.1.0",
     "usb": "^3.0.1",
     "xgecu-web": "github:elithrar/xgecu-web#main"
   }

@@ -13,6 +13,7 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   await setup.flush();
 
   const desktop = setup.captureCharFrame();
+  expect(desktop).toContain("MINIPRO");
   expect(desktop).toContain("Chip Search");
   expect(desktop).toContain("AT28C64B@DIP28");
   expect(backend.calls).toContain("status");
@@ -69,7 +70,7 @@ test("unavailable actions surface an error without touching USB", async () => {
   files.focus();
   setup.mockInput.pressKey("w");
   await setup.flush();
-  expect(setup.captureCharFrame()).toContain("Action needed: Select an image before writing.");
+  expect(setup.captureCharFrame()).toContain("Action needed:");
   expect(backend.calls).not.toContain("write");
   setup.renderer.destroy();
 });

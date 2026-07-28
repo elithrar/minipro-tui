@@ -10,7 +10,7 @@ test("status line shows disconnected programmer state", () => {
       database: "t48",
       job: { kind: "idle" },
     }),
-  ).toContain("| disconnected | t48 |");
+  ).toContain("USB disconnected | T48 catalog |");
 });
 
 test("status line stays compact", () => {
@@ -22,7 +22,7 @@ test("status line stays compact", () => {
     job: { kind: "idle" },
   });
 
-  expect(line).toContain("| T48 | t48 | AT28C64B | 911 chip 89 911 28pin 3.bin | idle");
+  expect(line).toContain("USB T48 | T48 catalog | AT28C64B | 911 chip 89 911 28pin 3.bin | idle");
   expect(line).not.toContain("8192 B");
   expect(line).not.toContain("a1b2c3d4");
 });
@@ -195,8 +195,8 @@ test("log formatting strips terminal escape sequences and bolds operation traces
   const content = formatLogContent(["$ direct USB operation", "done in 25ms"]);
   expect(content.chunks[0]?.text).toBe("$ direct USB operation\n");
   expect(content.chunks[0]?.attributes).toBe(TextAttributes.BOLD);
-  expect(content.chunks[0]?.bg?.toInts()).toEqual([40, 40, 40, 255]);
-  expect(content.chunks[0]?.fg?.toInts()).toEqual([250, 178, 131, 255]);
+  expect(content.chunks[0]?.bg?.toInts()).toEqual([55, 51, 40, 255]);
+  expect(content.chunks[0]?.fg?.toInts()).toEqual([255, 176, 0, 255]);
   expect(content.chunks[1]?.attributes).toBeUndefined();
   expect(content.chunks[1]?.bg).toBeUndefined();
 });

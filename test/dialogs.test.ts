@@ -46,8 +46,14 @@ test("confirmation renders bordered controls with safe keyboard defaults", async
   await setup.flush();
   setup.mockInput.pressKey("y");
   expect(await confirmedByShortcut).toBe(true);
-  expect(opened).toBe(3);
-  expect(closed).toBe(3);
+
+  const confirmedAfterWrapping = dialogs.confirm("Write Chip", "Review the operation", "Write");
+  await setup.flush();
+  setup.mockInput.pressTab({ shift: true });
+  setup.mockInput.pressEnter();
+  expect(await confirmedAfterWrapping).toBe(true);
+  expect(opened).toBe(4);
+  expect(closed).toBe(4);
   setup.renderer.destroy();
 });
 
@@ -87,7 +93,7 @@ test("open dialogs stay inside the terminal after resize", async () => {
   await setup.flush();
   setup.resize(32, 12);
   await setup.flush();
-  const modal = setup.renderer.root.getChildren().find((child) => child.id.startsWith("modal-") && !child.id.startsWith("modal-backdrop"));
+  const modal = setup.renderer.root.findDescendantById("modal-1");
   expect(modal?.width).toBeLessThanOrEqual(30);
   expect(modal?.height).toBeLessThanOrEqual(9);
   expect(setup.captureCharFrame()).toContain("Enter/Esc");

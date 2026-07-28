@@ -7,7 +7,7 @@ import {
   createCliRenderer,
   InputRenderable,
   InputRenderableEvents,
-  RGBA,
+  type ColorInput,
   RenderableEvents,
   ScrollBoxRenderable,
   SelectRenderable,
@@ -21,6 +21,8 @@ import {
   type SelectOption,
 } from "@opentui/core";
 
+import { createBadge } from "./components/ui/badge";
+import { createInput } from "./components/ui/input";
 import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerKind, ProgrammerStatus } from "./types";
 import { sha256Bytes } from "./files/hash";
 import { MAX_IMAGE_FILE_BYTES, normalizeImageBytes } from "./files/image";
@@ -31,20 +33,20 @@ import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings } from "./safety/opti
 import { loadState, saveState, type PersistedState } from "./state";
 import { DialogController } from "./tui/dialogs";
 import { formatChipInfo, formatChipLabel, formatFileTreeOption, formatGuidanceLine, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
+import { chromeForeground, tuiTheme } from "./tui/theme";
 
-const PRIMARY = "#ff8a00";
-const BG = "#0a0a0a";
-const PANEL = "#141414";
-const ELEMENT = "#1e1e1e";
-const ELEMENT_FOCUSED = "#282828";
-const BORDER = "#484848";
-const BORDER_ACTIVE = "#606060";
-const TEXT = "#eeeeee";
-const SELECTED_TEXT = "#0a0a0a";
-const MUTED = "#808080";
-const CONNECTED = "#11261a";
-const DISCONNECTED = "#2a1619";
-const CHROME_FG = RGBA.fromHex(TEXT);
+const PRIMARY = tuiTheme.primary;
+const BG = tuiTheme.background;
+const PANEL = tuiTheme.panel;
+const ELEMENT = tuiTheme.element;
+const ELEMENT_FOCUSED = tuiTheme.elementFocused;
+const BORDER = tuiTheme.border;
+const BORDER_ACTIVE = tuiTheme.borderActive;
+const TEXT = tuiTheme.text;
+const SELECTED_TEXT = tuiTheme.selectedText;
+const MUTED = tuiTheme.muted;
+const CONNECTED = tuiTheme.connected;
+const DISCONNECTED = tuiTheme.disconnected;
 const DEFAULT_DATABASE: ProgrammerKind = "t48";
 const DEFAULT_CHIP_QUERY = "AT28C64B";
 const SECONDARY_DEFAULT_CHIP = "M27C64A@DIP28";
@@ -71,6 +73,7 @@ type Components = {
   compactTabs: TabSelectRenderable;
   compactContent: BoxRenderable;
   statusBarBox: BoxRenderable;
+  statusChrome: TextRenderable;
   filesPanel: BoxRenderable;
   fileQuery: InputRenderable;
   files: SelectRenderable;
@@ -191,7 +194,32 @@ export class MiniproTuiApp {
       backgroundColor: BG,
     });
 
-    const statusBarBox = statusBox(renderer, "status-bar-box", DISCONNECTED, () => [this.statusLine, this.guidanceLine]);
+    const statusBarBox = new BoxRenderable(renderer, {
+      id: "status-bar-box",
+      width: "100%",
+      height: 2,
+      flexDirection: "row",
+      backgroundColor: BG,
+    });
+    const brandBadge = createBadge(renderer, {
+      id: "brand-badge",
+      label: "MINIPRO",
+      intent: "warning",
+      width: 11,
+      height: 2,
+      alignItems: "center",
+      justifyContent: "center",
+    });
+    const statusChrome = new TextRenderable(renderer, {
+      id: "status-chrome",
+      flexGrow: 1,
+      height: 2,
+      fg: TEXT,
+      bg: DISCONNECTED,
+      wrapMode: "none",
+    });
+    statusBarBox.add(brandBadge);
+    statusBarBox.add(statusChrome);
 
     const main = new BoxRenderable(renderer, {
       id: "main",
@@ -234,7 +262,7 @@ export class MiniproTuiApp {
     const topRow = new BoxRenderable(renderer, { id: "top-row", height: 15, width: "100%", flexDirection: "row", marginBottom: 1 });
     const filesPanel = panel(renderer, "files-panel", "Files");
     filesPanel.marginRight = 1;
-    const fileQuery = new InputRenderable(renderer, {
+    const fileQuery = createInput(renderer, {
       id: "file-query",
       value: "",
       placeholder: "Find files or folders",
@@ -257,7 +285,7 @@ export class MiniproTuiApp {
 
     const chipPanel = panel(renderer, "chip-panel", "Chip Search");
     chipPanel.marginRight = 1;
-    const chipQuery = new InputRenderable(renderer, {
+    const chipQuery = createInput(renderer, {
       id: "chip-query",
       value: DEFAULT_CHIP_QUERY,
       placeholder: "AT28C64B",
@@ -325,7 +353,7 @@ export class MiniproTuiApp {
     renderer.root.add(root);
     files.focus();
 
-    return { main, topRow, compactTabs, compactContent, statusBarBox, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, logText, footerBox };
+    return { main, topRow, compactTabs, compactContent, statusBarBox, statusChrome, filesPanel, fileQuery, files, chipPanel, chipQuery, chips, statusPanel, statusSummary, logPanel, log, logText, footerBox };
   }
 
   private bindKeys(renderer: CliRenderer, components: Components): void {
@@ -1182,7 +1210,7 @@ export class MiniproTuiApp {
   }
 
   private render(): void {
-    if (!this.components || this.shuttingDown) return;
+    if (!this.components || this.components.statusChrome.isDestroyed || this.shuttingDown) return;
     const focus = this.focusLabel();
     this.statusLine = `${formatStatusLine({
       programmerStatus: this.programmerStatus,
@@ -1191,7 +1219,6 @@ export class MiniproTuiApp {
       selectedFile: this.selectedFile,
       job: this.job,
     })} | Focus ${focus}`;
-    this.components.statusBarBox.backgroundColor = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
     const filteredFileEntries = filterFileTreeEntries(this.fileTreeEntries, this.fileQuery, this.fileDirectory);
     const visibleFileEntries = this.fileQuery.trim() ? filteredFileEntries : orderFileTreeEntries(filteredFileEntries, this.recentFilePaths, this.recentDirectories);
     const fileOptions = visibleFileEntries.length > 0
@@ -1235,6 +1262,8 @@ export class MiniproTuiApp {
       notice: this.notice,
       chipSearch: this.chipSearch,
     });
+    this.components.statusChrome.bg = this.programmerStatus.connected ? CONNECTED : DISCONNECTED;
+    this.components.statusChrome.content = `${this.statusLine}\n${this.guidanceLine}`;
     this.footerLine = footerText(focus, this.compactMode, this.activeCommandCancellable);
     this.renderer?.root.requestRender();
   }
@@ -1372,23 +1401,7 @@ function panel(renderer: CliRenderer, id: string, title: string): BoxRenderable 
   });
 }
 
-function statusBox(renderer: CliRenderer, id: string, backgroundColor: string, getLines: () => [string, string]): BoxRenderable {
-  return new BoxRenderable(renderer, {
-    id,
-    height: 2,
-    width: "100%",
-    backgroundColor,
-    padding: 0,
-    renderAfter: function (buffer) {
-      const lines = getLines();
-      for (const [index, line] of lines.entries()) {
-        buffer.drawText(truncateEnd(line, Math.max(0, this.width)), this.screenX, this.screenY + index, CHROME_FG);
-      }
-    },
-  });
-}
-
-function lineBox(renderer: CliRenderer, id: string, backgroundColor: string, getText: () => string, height = 1): BoxRenderable {
+function lineBox(renderer: CliRenderer, id: string, backgroundColor: ColorInput, getText: () => string, height = 1): BoxRenderable {
   return new BoxRenderable(renderer, {
     id,
     height,
@@ -1396,7 +1409,7 @@ function lineBox(renderer: CliRenderer, id: string, backgroundColor: string, get
     backgroundColor,
     padding: 0,
     renderAfter: function (buffer) {
-      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY + this.height - 1, CHROME_FG);
+      buffer.drawText(truncateEnd(getText(), Math.max(0, this.width)), this.screenX, this.screenY + this.height - 1, chromeForeground);
     },
   });
 }

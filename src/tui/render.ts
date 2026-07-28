@@ -1,7 +1,8 @@
-import { RGBA, StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
+import { parseColor, StyledText, TextAttributes, stripAnsiSequences } from "@opentui/core";
 
 import type { AdvancedOptions, ChipInfo, FileEntry, FileTreeEntry, JobState, ProgrammerKind, ProgrammerStatus } from "../types";
 import { formatBytes } from "../files/scan";
+import { tuiTheme } from "./theme";
 
 export type StatusSummaryInput = {
   programmerStatus: ProgrammerStatus;
@@ -34,9 +35,10 @@ export type GuidanceInput = {
 };
 
 const STATUS_LABEL_WIDTH = 8;
-const COMMAND_LOG_BG = RGBA.fromHex("#282828");
-const COMMAND_LOG_FG = RGBA.fromHex("#fab283");
-const DANGEROUS_OFF_BG = RGBA.fromHex("#5a1f1f");
+const COMMAND_LOG_BG = tuiTheme.elementFocused;
+const COMMAND_LOG_FG = parseColor(tuiTheme.primary);
+const DANGEROUS_OFF_BG = parseColor(tuiTheme.destructive);
+const DANGEROUS_OFF_FG = parseColor(tuiTheme.destructiveText);
 
 export function formatStatusLine(input: {
   programmerStatus: ProgrammerStatus;
@@ -49,7 +51,7 @@ export function formatStatusLine(input: {
   const file = input.selectedFile ? truncateMiddle(input.selectedFile.name, 30) : "no file";
   const chip = input.selectedChip ? truncateMiddle(input.selectedChip, 24) : "no chip";
   const job = input.job.kind === "running" ? input.job.step : input.job.kind;
-  return ` minipro-tui | ${programmer} | ${input.database} | ${chip} | ${file} | ${job}`;
+  return ` USB ${programmer} | ${input.database.toUpperCase()} catalog | ${chip} | ${file} | ${job}`;
 }
 
 export function formatGuidanceLine(input: GuidanceInput): string {
@@ -212,7 +214,7 @@ function formatStatusRowChunks(row: StatusRow, width: number | undefined, newlin
   if (row.stage === "on") {
     chunks.push({ __isChunk: true, text: value, attributes: TextAttributes.BOLD });
   } else if (row.stage === "danger-off") {
-    chunks.push({ __isChunk: true, text: value, fg: RGBA.fromHex("#ffffff"), bg: DANGEROUS_OFF_BG, attributes: TextAttributes.BOLD });
+    chunks.push({ __isChunk: true, text: value, fg: DANGEROUS_OFF_FG, bg: DANGEROUS_OFF_BG, attributes: TextAttributes.BOLD });
   } else {
     chunks.push({ __isChunk: true, text: value });
   }
