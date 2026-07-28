@@ -5,7 +5,7 @@ node_modules
 out
 dist
 *.tgz
-/minipro-tui
+/chipdesk
 .*.bun-build
 
 # Local ROM/bin working files

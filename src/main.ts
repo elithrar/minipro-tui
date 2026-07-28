@@ -1,6 +1,6 @@
-import { MiniproTuiApp } from "./app";
+import { ChipDeskApp } from "./app";
 
-const app = new MiniproTuiApp();
+const app = new ChipDeskApp();
 
 app.start().catch((error) => {
   console.error(error);

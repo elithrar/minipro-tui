@@ -1,10 +1,10 @@
-# minipro-tui
+# ChipDesk
 
-`minipro-tui` is an OpenTUI workbench for programming ROMs directly with XGecu T48 and T56 USB programmers.
+ChipDesk is an OpenTUI workbench for programming ROMs directly with XGecu T48 and T56 USB programmers.
 
 It scans the current directory for image files and uses the xgecu-web Zig/WebAssembly backend for its device catalog, USB transport, reads, writes, pin checks, and verification. The `minipro` command-line program is not required.
 
-<img width="1000" alt="minipro TUI screenshot of the workbench" src="https://github.com/user-attachments/assets/73f3df7b-0673-413b-acb4-8b2c70c00704" />
+<img width="1000" alt="ChipDesk EEPROM workbench" src="./docs/chipdesk.png" />
 
 ## Requirements
 
@@ -60,7 +60,7 @@ Press `m` to freeze the selected local image, read the chip directly over USB, a
 q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab/shift+tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
 ```
 
-The selected programmer, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/minipro-tui/state.json`. Overrides that weaken hardware checks reset on launch.
+The selected programmer, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/chipdesk/state.json`. Set `CHIPDESK_STATE` to use a different state file. Overrides that weaken hardware checks reset on launch.
 
 ## Backend
 
