@@ -4,7 +4,8 @@ ChipDesk is an OpenTUI workbench for programming ROMs directly with XGecu T48 an
 
 It scans the current directory for image files and uses the xgecu-web Zig/WebAssembly backend for its device catalog, USB transport, reads, writes, pin checks, and verification. The `minipro` command-line program is not required.
 
-<img width="1000" alt="ChipDesk EEPROM workbench" src="./docs/chipdesk.png" />
+<img width="1000" alt="ChipDesk EEPROM workbench" src="https://github.com/user-attachments/assets/ea4a8902-0253-4e04-9e88-f724f6830a0a" />
+
 
 ## Requirements
 
