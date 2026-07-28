@@ -28,8 +28,8 @@ test("confirmation renders bordered controls with safe keyboard defaults", async
   const cancelled = dialogs.confirm("Write Chip", "Review the operation", "Write");
   await setup.flush();
   const initial = setup.captureCharFrame();
-  expect(initial).toContain("╭");
-  expect(initial).toContain("Write Chip");
+  expect(initial).toContain("┌");
+  expect(initial).toContain("WRITE CHIP");
   expect(initial).toContain("Cancel");
   expect(initial).toContain("Write");
   expect(initial).toContain("N/Esc");
@@ -46,8 +46,14 @@ test("confirmation renders bordered controls with safe keyboard defaults", async
   await setup.flush();
   setup.mockInput.pressKey("y");
   expect(await confirmedByShortcut).toBe(true);
-  expect(opened).toBe(3);
-  expect(closed).toBe(3);
+
+  const confirmedAfterWrapping = dialogs.confirm("Write Chip", "Review the operation", "Write");
+  await setup.flush();
+  setup.mockInput.pressTab({ shift: true });
+  setup.mockInput.pressEnter();
+  expect(await confirmedAfterWrapping).toBe(true);
+  expect(opened).toBe(4);
+  expect(closed).toBe(4);
   setup.renderer.destroy();
 });
 
@@ -87,7 +93,7 @@ test("open dialogs stay inside the terminal after resize", async () => {
   await setup.flush();
   setup.resize(32, 12);
   await setup.flush();
-  const modal = setup.renderer.root.getChildren().find((child) => child.id.startsWith("modal-") && !child.id.startsWith("modal-backdrop"));
+  const modal = setup.renderer.root.findDescendantById("modal-1");
   expect(modal?.width).toBeLessThanOrEqual(30);
   expect(modal?.height).toBeLessThanOrEqual(9);
   expect(setup.captureCharFrame()).toContain("Enter/Esc");
@@ -114,5 +120,75 @@ test("confirmation controls remain visible after shrinking a long preview", asyn
   expect(frame).toContain("N/Esc");
   setup.mockInput.pressEscape();
   expect(await confirmation).toBe(false);
+  setup.renderer.destroy();
+});
+
+test("switch dialog exposes live tuiparts controls and closes with Escape", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24 });
+  const values = { backup: false, unsafe: true };
+  const dialogs = new DialogController({
+    getRenderer: () => setup.renderer,
+    theme,
+    onOpen: () => undefined,
+    onClose: () => undefined,
+  });
+
+  const controls = dialogs.switches("Advanced Controls", [
+    {
+      label: "PRE-WRITE BACKUP",
+      description: "Read the chip before erase.",
+      checked: values.backup,
+      onCheckedChange: (checked) => { values.backup = checked; },
+    },
+    {
+      label: "ALLOW SIZE MISMATCH",
+      description: "Dangerous size override.",
+      checked: values.unsafe,
+      onCheckedChange: (checked) => { values.unsafe = checked; },
+      tone: "danger",
+    },
+  ]);
+  await setup.flush();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("ADVANCED CONTROLS");
+  expect(frame).toContain("PRE-WRITE BACKUP");
+  expect(frame).toContain("ALLOW SIZE MISMATCH");
+
+  setup.mockInput.pressEnter();
+  setup.mockInput.pressTab();
+  setup.mockInput.pressEnter();
+  expect(values).toEqual({ backup: true, unsafe: false });
+  setup.mockInput.pressEscape();
+  await controls;
+  setup.renderer.destroy();
+});
+
+test("switch dialog scrolls the focused control into view", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24 });
+  const dialogs = new DialogController({
+    getRenderer: () => setup.renderer,
+    theme,
+    onOpen: () => undefined,
+    onClose: () => undefined,
+  });
+  const controls = dialogs.switches(
+    "Advanced Controls",
+    Array.from({ length: 9 }, (_, index) => ({
+      label: `OPTION ${index + 1}`,
+      description: `Description ${index + 1}`,
+      checked: false,
+      onCheckedChange: () => undefined,
+    })),
+  );
+  await setup.flush();
+  for (let index = 0; index < 8; index++) setup.mockInput.pressTab();
+  setup.resize(54, 14);
+  await setup.flush();
+  await setup.flush();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("OPTION 9");
+  expect(frame).toContain("Description 9");
+  setup.mockInput.pressEscape();
+  await controls;
   setup.renderer.destroy();
 });

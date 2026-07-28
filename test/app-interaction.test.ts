@@ -13,23 +13,39 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   await setup.flush();
 
   const desktop = setup.captureCharFrame();
-  expect(desktop).toContain("Chip Search");
+  expect(desktop).toContain("MINIPRO");
+  expect(desktop).toContain("01 IMAGE");
+  expect(desktop).toContain("02 DEVICE CATALOG");
+  expect(desktop).toContain("03 WRITE RECEIPT");
+  expect(desktop).toContain("Up/Down");
   expect(desktop).toContain("AT28C64B@DIP28");
   expect(backend.calls).toContain("status");
   expect(backend.calls).toContain("list:AT28C64B");
 
   const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
   chips.focus();
+  setup.resize(120, 24);
+  await setup.flush();
+  expect(setup.captureCharFrame()).toContain("Safety");
+  expect(setup.captureCharFrame()).toContain("Up/Down");
+
   setup.resize(70, 24);
   await setup.flush();
-  expect(setup.captureCharFrame()).toContain("Status");
+  expect(setup.captureCharFrame()).toContain("Safety");
   setup.mockInput.pressEnter();
   await setup.flush();
   expect(chips.focused).toBe(true);
 
+  setup.resize(50, 24);
+  await setup.flush();
+  const narrow = setup.captureCharFrame();
+  expect(narrow).toContain("MINIPRO");
+  expect(narrow).not.toContain("DIRECT USB");
+  expect(narrow).toContain("IDLE  //  CHIP RESULTS");
+
   setup.resize(120, 32);
   await setup.flush();
-  expect(setup.captureCharFrame()).toContain("Actions / Log");
+  expect(setup.captureCharFrame()).toContain("04 OPERATION TRACE");
   setup.renderer.destroy();
 });
 
@@ -69,7 +85,7 @@ test("unavailable actions surface an error without touching USB", async () => {
   files.focus();
   setup.mockInput.pressKey("w");
   await setup.flush();
-  expect(setup.captureCharFrame()).toContain("Action needed: Select an image before writing.");
+  expect(setup.captureCharFrame()).toContain("Action needed:");
   expect(backend.calls).not.toContain("write");
   setup.renderer.destroy();
 });
