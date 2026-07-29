@@ -44,7 +44,9 @@ Write confirmations default to cancel. Before mutation, ChipDesk freezes and has
 
 ## Credits
 
-Protocol and catalog support builds on the upstream [minipro library](https://gitlab.com/DavidGriffith/minipro).
+Protocol and catalog support is based on [minipro](https://gitlab.com/DavidGriffith/minipro), with a reimplementation in Zig as part of [xgecu-web](https://github.com/elithrar/xgecu-web) to support multiple transports (incl. WebUSB). 
+
+See [workbench.questionable.services](https://workbench.questionable.services/) and launch the ChipProgrammer app with a T48 or T56 programmer attached for a browser-based, Motronic-ROM focused version of this.
 
 ## Contributing
 
