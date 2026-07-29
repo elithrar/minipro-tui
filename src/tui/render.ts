@@ -108,12 +108,10 @@ export function formatFileTreeOption(entry: FileTreeEntry): { name: string; desc
 }
 
 export function formatChipLabel(chip: string, info?: ChipInfo): { name: string; description: string; value: string } {
-  const metadata = formatChipMetadata(info);
-  const isDefault = chip === "AT28C64B" || chip.startsWith("AT28C64B@");
-  const labelParts = [isDefault ? "default" : undefined, metadata].filter((part): part is string => Boolean(part));
+  const metadata = formatChipMetadata(chip, info);
   return {
-    name: labelParts.length > 0 ? `${chip} (${labelParts.join(", ")})` : chip,
-    description: isDefault ? "default" : "",
+    name: chip.split("@")[0] ?? chip,
+    description: metadata,
     value: chip,
   };
 }
@@ -173,10 +171,15 @@ function formatChipMemory(info: ChipInfo): string {
   return info.memoryBytes === undefined ? "size unknown" : formatBytes(info.memoryBytes);
 }
 
-function formatChipMetadata(info?: ChipInfo): string {
+function formatChipMetadata(chip: string, info?: ChipInfo): string {
   if (!info) return "";
 
-  const parts = [formatPackageName(info.packageName), info.canErase ? "erasable" : "external erase"].filter((part): part is string => Boolean(part));
+  const eraseMethod = info.canErase
+    ? "elec. erasable"
+    : /^M27C64A(?:@|$)/i.test(chip)
+      ? "UV erasable"
+      : "external erase";
+  const parts = [formatPackageName(info.packageName), eraseMethod].filter((part): part is string => Boolean(part));
   return parts.join(", ");
 }
 

@@ -18,11 +18,19 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   expect(desktop).toContain("02 DEVICE CATALOG");
   expect(desktop).toContain("03 WRITE RECEIPT");
   expect(desktop).toContain("Up/Down");
-  expect(desktop).toContain("AT28C64B@DIP28");
+  expect(desktop).toContain("AT28C64B");
+  expect(desktop).toContain("28 pin DIP, elec. erasable");
+  expect(desktop).toContain("28 pin DIP, UV erasable");
   expect(backend.calls).toContain("status");
   expect(backend.calls).toContain("list:AT28C64B");
 
   const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
+  expect(chips.options.map(({ name, description, value }) => ({ name, description, value }))).toEqual([
+    { name: "AT28C64B", description: "28 pin DIP, elec. erasable", value: "AT28C64B@DIP28" },
+    { name: "M27C64A", description: "28 pin DIP, UV erasable", value: "M27C64A@DIP28" },
+  ]);
+  expect(chips.getSelectedOption()?.value).toBe("AT28C64B@DIP28");
+  expect(backend.calls).toContain("resolve:M27C64A@DIP28");
   chips.focus();
   setup.resize(120, 24);
   await setup.flush();
@@ -42,6 +50,8 @@ test("uses the xgecu catalog and keeps compact navigation usable", async () => {
   expect(narrow).toContain("CHIPDESK");
   expect(narrow).not.toContain("DIRECT USB");
   expect(narrow).toContain("IDLE  //  CHIP RESULTS");
+  expect(narrow).toContain("28 pin DIP, elec. erasable");
+  expect(narrow).toContain("28 pin DIP, UV erasable");
 
   setup.resize(120, 32);
   await setup.flush();
@@ -78,6 +88,7 @@ test("search fields release focus through Escape and outside clicks", async () =
 test("unavailable actions surface an error without touching USB", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 });
   const backend = new FakeBackend();
+  backend.devices.length = 0;
   const app = new ChipDeskApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
   await app.start();
   await setup.flush();
