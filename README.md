@@ -1,68 +1,53 @@
 # ChipDesk
 
-ChipDesk is an OpenTUI workbench for programming ROMs directly with XGecu T48 and T56 USB programmers.
+**ChipDesk is a terminal workbench for XGecu T48 and T56 USB programmers.** Read, compare, verify, and write ROM images directly over USB—no XGPro or `minipro` CLI required.
 
-It scans the current directory for image files and uses the xgecu-web Zig/WebAssembly backend for its device catalog, USB transport, reads, writes, pin checks, and verification. The `minipro` command-line program is not required.
+ChipDesk builds on [xgecu-web](https://github.com/elithrar/xgecu-web) for its Zig/WebAssembly device logic and direct USB transport. It focuses on the XGecu programmer family: T48 is the current catalog-backed hardware path; T56 protocol support is present, with device operations expanding as validated T56 records and algorithms land.
 
 <img width="1000" alt="ChipDesk EEPROM workbench" src="https://github.com/user-attachments/assets/ea4a8902-0253-4e04-9e88-f724f6830a0a" />
 
-
-## Requirements
-
-- Bun 1.3 or newer.
-- An XGecu T48 or T56 for hardware operations.
-- OS permission to access the programmer over USB.
-
-The app starts without connected hardware so you can inspect files and search the bundled xgecu device catalog. The defaults are the T48 catalog and `AT28C64B` chip query.
-
-## Usage
+## Run
 
 ```bash
+git clone https://github.com/elithrar/chipdesk.git
+cd chipdesk
 bun install
-bun run dev
+bun run build
 ```
 
-Build and test:
+Launch the app from the directory containing your ROM images:
 
 ```bash
-bun run build
-bun test
-bunx tsc --noEmit
+cd /path/to/roms
+/path/to/chipdesk/chipdesk
 ```
 
-## Safe write flow
-
-Press `w` to review and confirm the write. The default workflow:
-
-- Freezes and hashes the selected image bytes before confirmation.
-- Connects to the programmer directly over USB.
-- Checks T48 pin contacts when the selected device supports it.
-- Optionally reads, syncs, and commits a pre-write backup.
-- Runs erase, a full blank readback, write, and backend verification through xgecu-web.
-- Reads the chip again and compares every byte independently.
-
-The mutation phase cannot be cancelled after it begins. xgecu-web always resets the programmer on operation completion or failure. Intel HEX and S-record images are checksum-validated and normalized before size checks and hardware access.
-
-Electrical erase is only requested for devices that support it. Nonerasable devices must already be externally erased; xgecu-web blank-checks them before programming. Size mismatches remain blocked unless the explicit override is enabled, and erase writes always require a full code-memory image.
-
-Disabling write protection is an explicit advanced option. When enabled, the confirmation warns that protection is not restored automatically.
-
-Enable `Pre-write backup` under Advanced Controls to save the current contents before mutation. Hardware reads only create new files; existing and raced destinations are never replaced.
-
-## Read and compare
-
-Press `R` to read the selected chip to a new file. The app hashes and syncs the bytes before completing the operation.
-
-Press `m` to freeze the selected local image, read the chip directly over USB, and compare every byte. Both hashes are reported on a mismatch.
+Requires Bun 1.3 or newer and OS permission to access the programmer over USB. ChipDesk scans the current directory for `.bin`, `.rom`, `.hex`, `.srec`, and `.eep` files. It starts without connected hardware, so you can inspect images and search the device catalog first.
 
 ## Keys
 
 ```text
-q quit | r refresh | R read | m compare | p programmer | f file search | / chip search | tab/shift+tab focus | enter select | c check | b blank | w write | v verify | a advanced | i chip info | l log | ? help
+Tab / Shift+Tab  move focus
+F                 search files
+/                 search devices
+Enter             select
+R                 refresh
+Shift+R           read
+W                 write
+M                 compare
+A                 advanced controls
+?                 full keyboard reference
+Q                 quit
 ```
 
-The selected programmer, pre-write backup preference, file visibility, and recent selections persist under `${XDG_CONFIG_HOME:-~/.config}/chipdesk/state.json`. Set `CHIPDESK_STATE` to use a different state file. Overrides that weaken hardware checks reset on launch.
+Write confirmations default to cancel. Before mutation, ChipDesk freezes and hashes the image, checks contacts when supported, can save a pre-write backup, blank-checks, verifies, and compares an independent readback. Erase and write cannot be cancelled once they begin.
 
-## Backend
+## Credits
 
-[xgecu-web](https://github.com/elithrar/xgecu-web) provides the Zig device logic, WebAssembly API, and WebUSB-compatible transport. [node-usb](https://github.com/node-usb/node-usb-rs) supplies the unrestricted USB provider used by the Bun process.
+Protocol and catalog support is based on [minipro](https://gitlab.com/DavidGriffith/minipro), with a reimplementation in Zig as part of [xgecu-web](https://github.com/elithrar/xgecu-web) to support multiple transports (incl. WebUSB). 
+
+See [workbench.questionable.services](https://workbench.questionable.services/) and launch the ChipProgrammer app with a T48 or T56 programmer attached for a browser-based, Motronic-ROM focused version of this.
+
+## Contributing
+
+Contributions and PRs are welcome. Keep them focused on XGecu programmers—especially T48 and T56—and the workflows around them. Support for unrelated programmer families may not be accepted.
