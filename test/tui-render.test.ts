@@ -181,12 +181,23 @@ test("chip labels include useful database metadata", () => {
       name: "M27C64A@DIP28",
       memoryBytes: 8192,
       packageName: "DIP28",
-      canErase: true,
+      canErase: false,
       raw: "Name: M27C64A@DIP28",
     }),
-  ).toEqual({ name: "M27C64A@DIP28 (28 pin DIP, erasable)", description: "", value: "M27C64A@DIP28" });
-  expect(formatChipLabel("AT28C64B")).toEqual({ name: "AT28C64B (default)", description: "default", value: "AT28C64B" });
-  expect(formatChipLabel("AT28C64B@DIP28")).toEqual({ name: "AT28C64B@DIP28 (default)", description: "default", value: "AT28C64B@DIP28" });
+  ).toEqual({ name: "M27C64A", description: "28 pin DIP, UV erasable", value: "M27C64A@DIP28" });
+  expect(formatChipLabel("AT28C64B")).toEqual({ name: "AT28C64B", description: "", value: "AT28C64B" });
+  expect(formatChipLabel("AT28C64B@DIP28", {
+    name: "AT28C64B@DIP28",
+    packageName: "DIP28",
+    canErase: true,
+    raw: "Name: AT28C64B@DIP28",
+  })).toEqual({ name: "AT28C64B", description: "28 pin DIP, elec. erasable", value: "AT28C64B@DIP28" });
+  expect(formatChipLabel("M27C128@DIP28", {
+    name: "M27C128@DIP28",
+    packageName: "DIP28",
+    canErase: false,
+    raw: "Name: M27C128@DIP28",
+  })).toEqual({ name: "M27C128", description: "28 pin DIP, external erase", value: "M27C128@DIP28" });
 });
 
 test("log formatting strips terminal escape sequences and bolds operation traces", () => {

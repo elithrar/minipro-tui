@@ -17,11 +17,31 @@ export const TEST_CHIP: ChipInfo = {
   raw: "AT28C64B test device",
 };
 
+const TEST_CHIP_ALIAS: ChipInfo = {
+  ...TEST_CHIP,
+  name: "AT28C64B",
+  raw: "AT28C64B alias test device",
+};
+
+export const TEST_UV_CHIP: ChipInfo = {
+  name: "M27C64A@DIP28",
+  aliases: [],
+  memoryBytes: 4,
+  packageName: "DIP28",
+  packagePins: 28,
+  blankValue: 0xff,
+  canErase: false,
+  supportsPinCheck: true,
+  supportsT48: true,
+  supportsT56: true,
+  raw: "M27C64A test device",
+};
+
 export class FakeBackend implements ProgrammerBackend {
   status: ProgrammerStatus = { connected: false, raw: "" };
   contents = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
   readonly calls: string[] = [];
-  readonly devices: ChipInfo[] = [TEST_CHIP];
+  readonly devices: ChipInfo[] = [TEST_CHIP_ALIAS, TEST_CHIP, TEST_UV_CHIP];
   onRead: ((options: ReadOptions) => Promise<Uint8Array>) | undefined;
   onWrite: ((options: WriteOptions) => Promise<void>) | undefined;
 

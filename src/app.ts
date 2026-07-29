@@ -375,7 +375,8 @@ export class ChipDeskApp {
     };
     const chips = new SelectRenderable(renderer, {
       ...selectOptions("chips", "100%"),
-      showDescription: false,
+      showDescription: true,
+      selectedDescriptionColor: BORDER,
       itemSpacing: 0,
     });
     chipSearchBox.add(chipQuery);
@@ -658,6 +659,12 @@ export class ChipDeskApp {
       if (!this.isCurrentChipSearch(requestId, database, query)) return;
       for (const info of devices) this.chipInfoCache.set(info.name, info);
       this.chipResults = orderChipResults(devices.map((device) => device.name), query);
+      for (const chip of this.chipResults) {
+        if (this.chipInfoCache.has(chip)) continue;
+        const info = this.requireBackend().resolveDevice(chip, database);
+        if (info) this.chipInfoCache.set(chip, info);
+      }
+      this.chipResults = this.chipResults.filter((chip) => this.chipInfoCache.has(chip));
       this.chipSearch = { requestId, query, phase: "details" };
       if (focusResults) components.chips.focus();
       this.render();
@@ -1359,7 +1366,7 @@ export class ChipDeskApp {
     const chipOptions = waitingForChipResults
       ? [formatChipSearchOption(this.chipQuery)]
       : visibleChips.length > 0
-        ? formatChipOptions(visibleChips, this.chipInfoCache, this.selectedChip, this.recentChips)
+        ? formatChipOptions(visibleChips, this.chipInfoCache)
         : [formatChipEmptyOption(this.chipQuery)];
     this.updateSelectOptions(this.components.chips, chipOptions, waitingForChipResults ? `<search:${this.chipSearch?.requestId}>` : visibleChips.length > 0 ? visibleChips.map((chip) => `${chip}:${chip === this.selectedChip}:${this.recentChips.includes(chip)}:${this.chipInfoCache.get(chip)?.raw ?? ""}`).join("\n") : "<no-chips>");
     this.setSelectedIndex(this.components.chips, chipOptions.findIndex((option) => option.value === this.selectedChip));
@@ -1628,11 +1635,18 @@ function truncateEnd(value: string, width: number): string {
 }
 
 function orderChipResults(chips: string[], query: string): string[] {
+  const packagedNames = new Set(chips.filter((chip) => chip.includes("@")).map(chipBaseName));
+  const deduplicated = chips.filter((chip) => chip.includes("@") || !packagedNames.has(chipBaseName(chip)));
   const seen = new Set<string>();
   const ordered: string[] = [];
-  const preferred = query === DEFAULT_CHIP_QUERY ? [DEFAULT_CHIP_QUERY, SECONDARY_DEFAULT_CHIP] : chips.filter((chip) => chip === DEFAULT_CHIP_QUERY || chip === SECONDARY_DEFAULT_CHIP);
+  const preferred = query === DEFAULT_CHIP_QUERY
+    ? [
+        ...deduplicated.filter((chip) => chipBaseName(chip) === DEFAULT_CHIP_QUERY.toLowerCase()),
+        SECONDARY_DEFAULT_CHIP,
+      ]
+    : deduplicated.filter((chip) => chipBaseName(chip) === DEFAULT_CHIP_QUERY.toLowerCase() || chip === SECONDARY_DEFAULT_CHIP);
 
-  for (const chip of [...preferred, ...chips]) {
+  for (const chip of [...preferred, ...deduplicated]) {
     if (seen.has(chip)) continue;
     seen.add(chip);
     ordered.push(chip);
@@ -1641,17 +1655,12 @@ function orderChipResults(chips: string[], query: string): string[] {
   return ordered;
 }
 
-function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>, selectedChip: string | undefined, recentChips: string[]): SelectOption[] {
-  return chips.map((chip) => {
-    const option = formatChipLabel(chip, infoByChip.get(chip));
-    const current = chip === selectedChip;
-    const recent = recentChips.includes(chip);
-    return {
-      ...option,
-      name: formatCurrentName(option.name, current),
-      description: formatRecentDescription(recent, current, option.description),
-    };
-  });
+function chipBaseName(chip: string): string {
+  return (chip.split("@")[0] ?? chip).toLowerCase();
+}
+
+function formatChipOptions(chips: string[], infoByChip: Map<string, ChipInfo>): SelectOption[] {
+  return chips.map((chip) => formatChipLabel(chip, infoByChip.get(chip)));
 }
 
 function formatFileTreeDisplayOption(entry: FileTreeEntry, selectedPath: string | undefined, recentFiles: string[], recentDirectories: string[]): SelectOption {
