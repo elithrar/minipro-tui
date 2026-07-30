@@ -79,6 +79,7 @@ type Components = {
   disconnectedBadge: BoxRenderable;
   t48Badge: BoxRenderable;
   t56Badge: BoxRenderable;
+  t76Badge: BoxRenderable;
   filesPanel: BoxRenderable;
   fileSearchBox: BoxRenderable;
   fileQuery: InputRenderable;
@@ -260,6 +261,7 @@ export class ChipDeskApp {
     const disconnectedBadge = createBadge(renderer, { label: "USB OFFLINE", intent: "danger", height: 1 });
     const t48Badge = createBadge(renderer, { label: "T48 CATALOG", intent: "warning", height: 1 });
     const t56Badge = createBadge(renderer, { label: "T56 CATALOG", intent: "warning", height: 1 });
+    const t76Badge = createBadge(renderer, { label: "T76 CATALOG", intent: "warning", height: 1 });
     const statusChrome = new TextRenderable(renderer, {
       id: "status-chrome",
       flexGrow: 1,
@@ -272,6 +274,7 @@ export class ChipDeskApp {
     contextRow.add(disconnectedBadge);
     contextRow.add(t48Badge);
     contextRow.add(t56Badge);
+    contextRow.add(t76Badge);
     contextRow.add(statusChrome);
     const guidanceChrome = new TextRenderable(renderer, {
       id: "guidance-chrome",
@@ -447,7 +450,7 @@ export class ChipDeskApp {
 
     return {
       main, topRow, compactTabs, compactContent, statusBarBox, brandBadge, compactBrandBadge, buildLabel, statusChrome, guidanceChrome,
-      connectedBadge, disconnectedBadge, t48Badge, t56Badge,
+      connectedBadge, disconnectedBadge, t48Badge, t56Badge, t76Badge,
       filesPanel, fileSearchBox, fileQuery, files,
       chipPanel, chipSearchBox, chipQuery, chips,
       statusPanel, statusSummary, logPanel, log, logText, footerBox, footerText,
@@ -753,7 +756,7 @@ export class ChipDeskApp {
 
   private async pickProgrammerDatabase(): Promise<void> {
     if (this.job.kind === "running") return;
-    const kinds: ProgrammerKind[] = ["t48", "t56"];
+    const kinds: ProgrammerKind[] = ["t48", "t56", "t76"];
     const orderedKinds = orderByRecents(kinds, this.recentDatabases);
     const choice = await this.dialogs.select(
       "Programmer Database",
@@ -1401,6 +1404,7 @@ export class ChipDeskApp {
     this.components.disconnectedBadge.visible = !this.programmerStatus.connected;
     this.components.t48Badge.visible = !this.compactMode && this.database === "t48";
     this.components.t56Badge.visible = !this.compactMode && this.database === "t56";
+    this.components.t76Badge.visible = !this.compactMode && this.database === "t76";
     const jobLabel = this.job.kind === "running" ? this.job.step : this.job.kind;
     this.components.statusChrome.content = this.compactMode
       ? ` ${jobLabel.toUpperCase()}  //  ${focus.toUpperCase()}`
@@ -1805,7 +1809,7 @@ function panelShortcut(id: string): string | undefined {
 }
 
 function isProgrammerKind(value: string): value is ProgrammerKind {
-  return value === "t48" || value === "t56";
+  return value === "t48" || value === "t56" || value === "t76";
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {

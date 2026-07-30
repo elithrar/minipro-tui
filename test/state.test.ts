@@ -11,13 +11,13 @@ test("persists and restores preferences and recents", async () => {
   const path = join(dir, "state.json");
   const state: PersistedState = {
     version: 1,
-    database: "t56",
+    database: "t76",
     showAllFiles: true,
     advanced: { backupBeforeWrite: true, skipVerify: true },
     recentFilePaths: ["/tmp/image.bin"],
     recentDirectories: ["/tmp"],
     recentChips: ["AT28C64B"],
-    recentDatabases: ["t56", "t48"],
+    recentDatabases: ["t76", "t56", "t48"],
   };
 
   await saveState(state, path);

@@ -13,7 +13,8 @@
 ## Runtime Requirements
 
 - Hardware workflows use xgecu-web and the USB transport directly; tests do not require hardware.
-- The process needs OS permission to access an attached XGecu T48 or T56.
+- The process needs OS permission to access an attached XGecu T48, T56, or T76.
+- T56 and T76 ROM operations require `CHIPDESK_ALGORITHM_XML` to point to a user-local `algorithm.xml`; never bundle or persist that vendor file.
 - The app can start without a connected programmer; default database is `T48`, default chip query is `AT28C64B`.
 
 ## Code Map

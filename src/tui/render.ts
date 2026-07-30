@@ -73,6 +73,9 @@ export function formatGuidanceLine(input: GuidanceInput): string {
   if (!/\.(hex|srec)$/i.test(input.selectedFile.name) && input.chipInfo.memoryBytes !== undefined && input.selectedFile.size !== input.chipInfo.memoryBytes && !input.advanced.allowSizeMismatch) {
     return " Blocked: image and chip sizes differ. Choose another image or chip.";
   }
+  if (input.database !== "t48" && input.programmerStatus.algorithmAvailable === false) {
+    return " Blocked: set CHIPDESK_ALGORITHM_XML to a user-local algorithm.xml and restart.";
+  }
 
   const overrideCount = formatDangerousOptions(input.advanced).length;
   if (overrideCount > 0) return ` Review: ${overrideCount} safety override${overrideCount === 1 ? " is" : "s are"} active. Press A before continuing.`;
@@ -150,7 +153,11 @@ export function formatChipInfo(info?: ChipInfo): string {
     `Blank value: ${info.blankValue === undefined ? "unknown" : `0x${info.blankValue.toString(16).padStart(2, "0")}`}`,
     `Electrical erase: ${info.canErase ? "supported" : "external erase required"}`,
     `Pin check: ${info.supportsPinCheck ? "supported" : "unavailable"}`,
-    `Programmers: ${[info.supportsT48 ? "T48" : undefined, info.supportsT56 ? "T56" : undefined].filter(Boolean).join(", ")}`,
+    `Programmers: ${[
+      info.supportsT48 ? "T48" : undefined,
+      info.supportsT56 ? "T56" : undefined,
+      info.supportsT76 ? "T76" : undefined,
+    ].filter(Boolean).join(", ")}`,
     "",
     info.raw,
   ].join("\n");

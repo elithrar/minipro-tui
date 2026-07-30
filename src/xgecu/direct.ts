@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
+
 import {
+  createAlgorithmXmlProvider,
   createProgrammer,
   type DeviceDetail,
   type ProgrammerConnection,
@@ -12,9 +15,22 @@ import type { ChipInfo, ProgrammerKind, ProgrammerStatus } from "../types";
 import type { PinContactResult, ProgrammerBackend, ReadOptions, WriteOptions } from "./backend";
 
 type NodeUsbDeviceHandle = Awaited<ReturnType<typeof usb.getDevices>>[number];
+const T76_PRODUCT_ID = 0x1a86;
 
-export async function createXgecuBackend(): Promise<ProgrammerBackend> {
-  return new DirectXgecuBackend(await createProgrammer({ usb: new NodeUsbNavigator() }));
+export async function createXgecuBackend(
+  options: { algorithmXmlPath?: string | null } = {},
+): Promise<ProgrammerBackend> {
+  const configuredPath = options.algorithmXmlPath === undefined
+    ? process.env.CHIPDESK_ALGORITHM_XML
+    : options.algorithmXmlPath;
+  const algorithmXmlPath = configuredPath?.trim();
+  const algorithmProvider = algorithmXmlPath
+    ? createAlgorithmXmlProvider(await readFile(algorithmXmlPath, "utf8"))
+    : undefined;
+  return new DirectXgecuBackend(
+    await createProgrammer({ usb: new NodeUsbNavigator(), algorithmProvider }),
+    algorithmProvider !== undefined,
+  );
 }
 
 class NodeUsbNavigator implements USBNavigatorLike {
@@ -73,7 +89,10 @@ class NodeUsbDevice implements USBDeviceLike {
 class DirectXgecuBackend implements ProgrammerBackend {
   private connection: ProgrammerConnection | undefined;
 
-  constructor(private readonly api: XgecuWebUSB) {}
+  constructor(
+    private readonly api: XgecuWebUSB,
+    private readonly algorithmAvailable: boolean,
+  ) {}
 
   listDevices(query: string, programmerKind: ProgrammerKind): ChipInfo[] {
     return this.api.deviceList({ search: query, programmer: programmerKind }).map(toChipInfo);
@@ -86,12 +105,19 @@ class DirectXgecuBackend implements ProgrammerBackend {
 
   async getStatus(): Promise<ProgrammerStatus> {
     const first = (await this.api.getProgrammers())[0];
-    if (!first) return { connected: false, raw: "No T48/T56 programmer detected." };
+    if (!first) {
+      return {
+        connected: false,
+        algorithmAvailable: this.algorithmAvailable,
+        raw: "No T48/T56/T76 programmer detected.",
+      };
+    }
     const model = first.productName || "XGecu programmer";
     return {
       connected: true,
       model,
-      kind: inferProgrammerKind(model),
+      kind: inferProgrammerKind(model, first.productId),
+      algorithmAvailable: this.algorithmAvailable,
       raw: [first.manufacturerName, first.productName, first.serialNumber].filter(Boolean).join(" "),
     };
   }
@@ -104,6 +130,7 @@ class DirectXgecuBackend implements ProgrammerBackend {
   }
 
   async readROM(options: ReadOptions): Promise<Uint8Array> {
+    this.requireAlgorithm(options.programmerKind);
     return this.api.readROM({
       programmer: await this.ensureConnection(), device: options.chip, programmerKind: options.programmerKind,
       skipIdCheck: options.skipIdCheck, continueOnIdMismatch: options.continueOnIdMismatch,
@@ -112,6 +139,7 @@ class DirectXgecuBackend implements ProgrammerBackend {
   }
 
   async writeROM(options: WriteOptions): Promise<void> {
+    this.requireAlgorithm(options.programmerKind);
     await this.api.writeROM({
       programmer: await this.ensureConnection(), device: options.chip, programmerKind: options.programmerKind,
       data: options.data, erase: options.erase, verify: options.verify, unprotectBefore: options.unprotectBefore,
@@ -130,6 +158,14 @@ class DirectXgecuBackend implements ProgrammerBackend {
     if (!this.connection) this.connection = await this.api.requestProgrammer();
     return this.connection;
   }
+
+  private requireAlgorithm(programmerKind: ProgrammerKind): void {
+    if (programmerKind === "t48" || this.algorithmAvailable) return;
+    throw new Error(
+      `${programmerKind.toUpperCase()} operations require a user-local algorithm.xml. ` +
+      "Set CHIPDESK_ALGORITHM_XML to its path and restart ChipDesk.",
+    );
+  }
 }
 
 function toChipInfo(device: DeviceDetail): ChipInfo {
@@ -139,11 +175,13 @@ function toChipInfo(device: DeviceDetail): ChipInfo {
     packagePins: device.packagePins, blankValue: device.blankValue, canErase: device.canErase,
     supportsUnprotect: device.supportsUnprotect, supportsProtect: device.supportsProtect,
     supportsPinCheck: device.supportsPinCheck, supportsT48: device.supportsT48, supportsT56: device.supportsT56,
+    supportsT76: device.supportsT76,
     raw: JSON.stringify(device, null, 2),
   };
 }
 
-function inferProgrammerKind(productName: string): ProgrammerKind | undefined {
+export function inferProgrammerKind(productName: string, productId: number): ProgrammerKind | undefined {
+  if (productId === T76_PRODUCT_ID) return "t76";
   const value = productName.toLowerCase();
   if (value.includes("t48")) return "t48";
   if (value.includes("t56")) return "t56";

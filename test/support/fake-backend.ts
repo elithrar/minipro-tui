@@ -14,6 +14,7 @@ export const TEST_CHIP: ChipInfo = {
   supportsPinCheck: true,
   supportsT48: true,
   supportsT56: true,
+  supportsT76: true,
   raw: "AT28C64B test device",
 };
 
