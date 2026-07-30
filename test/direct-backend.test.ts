@@ -11,6 +11,9 @@ test("detects T76 from its distinct USB product ID", () => {
 test("blocks T56 and T76 before USB access when no local algorithm is configured", async () => {
   const backend = await createXgecuBackend({ algorithmXmlPath: null });
   try {
+    expect(backend.resolveDevice("AT28C64B@DIP28", "t48")?.supportsPinCheck).toBe(true);
+    expect(backend.resolveDevice("AT28C64B@DIP28", "t56")?.supportsPinCheck).toBe(false);
+    expect(backend.resolveDevice("AT28C64B@DIP28", "t76")?.supportsPinCheck).toBe(false);
     for (const programmerKind of ["t56", "t76"] as const) {
       await expect(backend.readROM({
         chip: "AT28C64B@DIP28",

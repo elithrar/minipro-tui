@@ -28,7 +28,7 @@ import { MAX_IMAGE_FILE_BYTES, normalizeImageBytes } from "./files/image";
 import { isFileEntry, scanFileTree } from "./files/scan";
 import type { ProgrammerBackend, ReadOptions } from "./xgecu/backend";
 import { captureDestination, runCompareWorkflow, runDefaultWriteWorkflow, runReadWorkflow, type DestinationSnapshot } from "./xgecu/workflow";
-import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings } from "./safety/options";
+import { DEFAULT_ADVANCED_OPTIONS, dangerousOptionWarnings, programmerWriteWarnings } from "./safety/options";
 import { loadState, saveState, type PersistedState } from "./state";
 import { DialogController } from "./tui/dialogs";
 import { formatChipInfo, formatChipLabel, formatFileTreeOption, formatGuidanceLine, formatLogContent, formatStatusLine, formatStatusSummaryContent, sanitizeLogLine } from "./tui/render";
@@ -899,6 +899,7 @@ export class ChipDeskApp {
         preview,
         "",
         ...dangerousOptionWarnings(advanced),
+        ...programmerWriteWarnings(database, chipInfo),
       ].join("\n"),
       "Write",
     );

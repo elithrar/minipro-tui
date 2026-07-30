@@ -95,12 +95,13 @@ class DirectXgecuBackend implements ProgrammerBackend {
   ) {}
 
   listDevices(query: string, programmerKind: ProgrammerKind): ChipInfo[] {
-    return this.api.deviceList({ search: query, programmer: programmerKind }).map(toChipInfo);
+    return this.api.deviceList({ search: query, programmer: programmerKind })
+      .map((device) => toChipInfo(device, programmerKind));
   }
 
   resolveDevice(name: string, programmerKind: ProgrammerKind): ChipInfo | undefined {
     const detail = this.api.resolveDevice(name, programmerKind);
-    return detail ? toChipInfo(detail) : undefined;
+    return detail ? toChipInfo(detail, programmerKind) : undefined;
   }
 
   async getStatus(): Promise<ProgrammerStatus> {
@@ -168,13 +169,14 @@ class DirectXgecuBackend implements ProgrammerBackend {
   }
 }
 
-function toChipInfo(device: DeviceDetail): ChipInfo {
+function toChipInfo(device: DeviceDetail, programmerKind: ProgrammerKind): ChipInfo {
   return {
     name: device.name, aliases: [...device.aliases], memoryBytes: device.codeMemorySize,
     packageName: device.packagePins > 0 ? `DIP${device.packagePins}` : undefined,
     packagePins: device.packagePins, blankValue: device.blankValue, canErase: device.canErase,
     supportsUnprotect: device.supportsUnprotect, supportsProtect: device.supportsProtect,
-    supportsPinCheck: device.supportsPinCheck, supportsT48: device.supportsT48, supportsT56: device.supportsT56,
+    supportsPinCheck: programmerKind === "t48" && device.supportsPinCheck,
+    supportsT48: device.supportsT48, supportsT56: device.supportsT56,
     supportsT76: device.supportsT76,
     raw: JSON.stringify(device, null, 2),
   };
