@@ -85,6 +85,29 @@ test("search fields release focus through Escape and outside clicks", async () =
   setup.renderer.destroy();
 });
 
+test("an empty chip search shows the full selected programmer catalog", async () => {
+  const setup = await createTestRenderer({ width: 120, height: 32 });
+  const backend = new FakeBackend();
+  const app = new ChipDeskApp({ renderer: setup.renderer, backend, persistence: false, exit: () => undefined });
+  await app.start();
+  await setup.flush();
+
+  const chipQuery = setup.renderer.root.findDescendantById("chip-query") as InputRenderable;
+  const chips = setup.renderer.root.findDescendantById("chips") as SelectRenderable;
+  chipQuery.value = "";
+  chipQuery.focus();
+  setup.mockInput.pressEnter();
+  await Bun.sleep(25);
+  await setup.flush();
+
+  expect(backend.calls).toContain("list:");
+  expect(chips.options.map((option) => option.value)).toEqual([
+    "AT28C64B@DIP28",
+    "M27C64A@DIP28",
+  ]);
+  setup.renderer.destroy();
+});
+
 test("unavailable actions surface an error without touching USB", async () => {
   const setup = await createTestRenderer({ width: 120, height: 32 });
   const backend = new FakeBackend();

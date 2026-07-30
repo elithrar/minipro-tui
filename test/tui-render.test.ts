@@ -37,6 +37,7 @@ test("guidance prioritizes live work, action errors, blockers, and readiness", (
   };
   expect(formatGuidanceLine(base)).toContain("Next: choose an image");
   expect(formatGuidanceLine({ ...base, chipSearch: { query: "M27C64", phase: "results" } })).toContain('Searching t48 chips for "M27C64"');
+  expect(formatGuidanceLine({ ...base, chipSearch: { query: "", phase: "results" } })).toContain("Loading the full t48 chip catalog");
   expect(formatGuidanceLine({ ...base, notice: { tone: "error", message: "Select an image before writing." } })).toContain("Action needed: Select an image before writing.");
   expect(formatGuidanceLine({ ...base, job: { kind: "failed", step: "read", message: "\u001b[31mread failed\ncheck connection" } })).toContain("Failed: read failed check connection");
 

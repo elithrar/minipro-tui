@@ -575,7 +575,7 @@ export class ChipDeskApp {
     });
 
     components.chipQuery.on(InputRenderableEvents.ENTER, (value: string) => {
-      void this.searchChip(value.trim() || DEFAULT_CHIP_QUERY, false, true);
+      void this.searchChip(value.trim(), false, true);
     });
 
     components.fileQuery.on(InputRenderableEvents.INPUT, (value: string) => {
@@ -655,7 +655,7 @@ export class ChipDeskApp {
     this.chipSearch = { requestId, query, phase: "results" };
     const components = this.requireComponents();
     components.chipQuery.value = query;
-    this.appendLog(`Searching ${database} database for ${query}.`);
+    this.appendLog(`Searching ${database} database for ${query || "all chips"}.`);
     this.render();
     try {
       const devices = this.requireBackend().listDevices(query, database);
@@ -771,7 +771,7 @@ export class ChipDeskApp {
     this.selectedChip = undefined;
     this.chipInfo = undefined;
     this.appendLog(`Selected programmer database ${this.database}.`);
-    await this.searchChip(this.chipQuery || DEFAULT_CHIP_QUERY, true);
+    await this.searchChip(this.chipQuery, true);
   }
 
   private async pinCheck(): Promise<void> {
@@ -1117,6 +1117,7 @@ export class ChipDeskApp {
         "",
         "Actions",
         "  R          Refresh files and programmer status",
+        "  P          Choose the T48, T56, or T76 device catalog",
         "  Shift+R    Read the selected chip",
         "  W          Write the selected image",
         "  M          Compare chip contents with the selected image",
@@ -1126,7 +1127,7 @@ export class ChipDeskApp {
         "Safety",
         "  Confirmations default to Cancel. Use Left/Right or Tab, then Enter.",
         "  Erase and write cannot be cancelled after those steps begin.",
-        "  Defaults: T48 database and AT28C64B chip query.",
+        "  Defaults: T48 database and AT28C64B chip query. Submit an empty chip query to list the full catalog.",
       ].join("\n"),
     );
   }
@@ -1701,12 +1702,17 @@ function formatFileEmptyOption(directory: string, query: string, showAllFiles: b
 }
 
 function formatChipEmptyOption(query: string): SelectOption {
-  const label = query.trim() || DEFAULT_CHIP_QUERY;
-  return { name: "No matching chips", description: `No ${label} results. Edit the chip query and press Enter.`, value: "" };
+  const label = query.trim();
+  return {
+    name: "No matching chips",
+    description: label ? `No ${label} results. Edit the chip query and press Enter.` : "The selected programmer catalog is empty.",
+    value: "",
+  };
 }
 
 function formatChipSearchOption(query: string): SelectOption {
-  return { name: "Searching chips...", description: `Querying the ${query.trim() || DEFAULT_CHIP_QUERY} device list.`, value: "" };
+  const label = query.trim();
+  return { name: "Searching chips...", description: label ? `Querying the ${label} device list.` : "Loading the full device catalog.", value: "" };
 }
 
 function orderFileTreeEntries(entries: FileTreeEntry[], recentFiles: string[], recentDirectories: string[]): FileTreeEntry[] {

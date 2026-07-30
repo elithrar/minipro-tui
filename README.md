@@ -38,6 +38,7 @@ The XGECU core extracts only the requested algorithm and verifies its CRC, decod
 Tab / Shift+Tab  move focus
 F                 search files
 /                 search devices
+P                 choose T48, T56, or T76 catalog
 Enter             select
 R                 refresh
 Shift+R           read
@@ -47,6 +48,8 @@ A                 advanced controls
 ?                 full keyboard reference
 Q                 quit
 ```
+
+Submit an empty device search to list every chip supported by the selected programmer catalog.
 
 Write confirmations default to cancel. Before mutation, ChipDesk freezes and hashes the image, checks contacts when supported, can save a pre-write backup, blank-checks, verifies, and compares an independent readback. Erase and write cannot be cancelled once they begin.
 
