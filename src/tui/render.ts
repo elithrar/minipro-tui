@@ -57,7 +57,10 @@ export function formatStatusLine(input: {
 }
 
 export function formatGuidanceLine(input: GuidanceInput): string {
-  if (input.chipSearch?.phase === "results") return ` Searching ${input.database} chips for "${inlineText(input.chipSearch.query)}"...`;
+  if (input.chipSearch?.phase === "results") {
+    const query = inlineText(input.chipSearch.query);
+    return query ? ` Searching ${input.database} chips for "${query}"...` : ` Loading the full ${input.database} chip catalog...`;
+  }
   if (input.chipSearch?.phase === "details") return " Loading chip details; results are ready to browse.";
   if (input.job.kind === "running") {
     const cancel = input.activeCommandCancellable ? " Press Esc to cancel this step." : "";

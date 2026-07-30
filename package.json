@@ -18,6 +18,6 @@
     "@opentui/core": "^0.4.3",
     "@tuiparts/core": ">=0.0.1 <0.1.0",
     "usb": "^3.0.1",
-    "xgecu-web": "github:elithrar/xgecu-web#c9eb9893360e4488e9fa79f809bb8d7759b20c48"
+    "xgecu-web": "github:elithrar/xgecu-web#c8510a143a9b14f1a1e6b54d133753f50d720f18"
   }
 }
