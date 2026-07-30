@@ -48,6 +48,12 @@ test("guidance prioritizes live work, action errors, blockers, and readiness", (
   };
   expect(formatGuidanceLine(selected)).toContain("Blocked: image and chip sizes differ");
   expect(formatGuidanceLine({ ...selected, selectedFile: { ...selected.selectedFile, size: 8192 } })).toContain("Ready to review. Connect a programmer");
+  expect(formatGuidanceLine({
+    ...selected,
+    programmerStatus: { connected: true, model: "T76", kind: "t76", algorithmAvailable: false, raw: "T76" },
+    database: "t76",
+    selectedFile: { ...selected.selectedFile, size: 8192 },
+  })).toContain("Blocked: set CHIPDESK_ALGORITHM_XML");
 });
 
 test("status summary shows matching chip and image as ready", () => {

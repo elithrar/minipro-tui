@@ -1,4 +1,4 @@
-import type { AdvancedOptions } from "../types";
+import type { AdvancedOptions, ChipInfo, ProgrammerKind } from "../types";
 
 export const DEFAULT_ADVANCED_OPTIONS: AdvancedOptions = {
   disableReadbackCompare: false,
@@ -20,4 +20,11 @@ export function dangerousOptionWarnings(options: AdvancedOptions): string[] {
 
 export function hasDangerousOptions(options: AdvancedOptions): boolean {
   return dangerousOptionWarnings(options).length > 0;
+}
+
+export function programmerWriteWarnings(programmerKind: ProgrammerKind, chip: ChipInfo): string[] {
+  if (programmerKind !== "t76" || !chip.supportsUnprotect) return [];
+  return [
+    "T76 will automatically disable this target's software write protection before erase and will leave it disabled after writing.",
+  ];
 }

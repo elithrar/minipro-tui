@@ -1,9 +1,10 @@
-export type ProgrammerKind = "t48" | "t56";
+export type ProgrammerKind = "t48" | "t56" | "t76";
 
 export type ProgrammerStatus = {
   connected: boolean;
   model?: string;
   kind?: ProgrammerKind;
+  algorithmAvailable?: boolean;
   raw: string;
 };
 
@@ -38,6 +39,7 @@ export type ChipInfo = {
   supportsPinCheck?: boolean;
   supportsT48?: boolean;
   supportsT56?: boolean;
+  supportsT76?: boolean;
   raw: string;
 };
 
